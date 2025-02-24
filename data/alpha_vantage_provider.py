@@ -45,7 +45,7 @@ class AlphaVantageDataProvider(DataProvider):
             'datatype': 'json',
             'adjusted': 'true',
             'extended_hours': 'false',
-            'month' : "2025-01"
+            'month' : "2025-02"
         }
 
         try:
