@@ -24,7 +24,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import axios from 'axios';
 import { format } from 'date-fns';
-import CandlestickChart from '../components/CandlestickChart';
+import TradingViewChart from '../components/TradingViewChart';
 import SignalSummary from '../components/SignalSummary';
 import Loading from '../components/Loading';
 
@@ -182,7 +182,7 @@ const Signals = () => {
                       Price Chart with Signals
                     </Typography>
                     <Divider sx={{ mb: 2 }} />
-                    <CandlestickChart data={historicalData} signals={signals} />
+                    <TradingViewChart data={historicalData} signals={signals} />
                   </Paper>
               )}
 

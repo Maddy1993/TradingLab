@@ -4,7 +4,9 @@ WORKDIR /app
 
 # Copy package files and install dependencies
 COPY ui/package.json ui/package-lock.json* ./
-RUN npm install
+
+# Add the lightweight-charts package explicitly
+RUN npm install && npm install --save lightweight-charts@4.1.1
 
 # Copy source code
 COPY ui/public ./public

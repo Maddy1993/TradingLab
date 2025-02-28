@@ -22,7 +22,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 import { format } from 'date-fns';
-import CandlestickChart from '../components/CandlestickChart';
+import TradingViewChart from '../components/TradingViewChart';
 import Loading from '../components/Loading';
 
 const Historical = () => {
@@ -200,7 +200,7 @@ const Historical = () => {
                     </Grid>
 
                     <Paper sx={{ mb: 3 }}>
-                      <CandlestickChart data={historicalData} />
+                      <TradingViewChart data={historicalData} />
                     </Paper>
 
                     <Paper>
