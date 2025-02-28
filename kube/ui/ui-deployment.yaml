@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradinglab-ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tradinglab-ui
+  template:
+    metadata:
+      labels:
+        app: tradinglab-ui
+    spec:
+      imagePullSecrets:
+        - name: gcr-json-key
+      containers:
+        - name: tradinglab-ui
+          image: us-central1-docker.pkg.dev/financetracker-451021/tradinglab-ui/tradinglab-ui:v1
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 60
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 90
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradinglab-ui
+spec:
+  selector:
+    app: tradinglab-ui
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer

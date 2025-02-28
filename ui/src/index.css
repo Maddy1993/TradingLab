@@ -1,0 +1,56 @@
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.candlestick-chart {
+    margin-top: 20px;
+    height: 500px;
+    width: 100%;
+}
+
+.candlestick-tooltip {
+    background-color: rgba(0, 0, 0, 0.8);
+    border: 1px solid #333;
+    padding: 10px;
+    border-radius: 4px;
+    color: #fff;
+}
+
+.backtest-card {
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.backtest-card:hover {
+    transform: translateY(-5px);
+}
+
+.signal-positive {
+    color: #4caf50;
+}
+
+.signal-negative {
+    color: #f44336;
+}
+
+.recommendation-card {
+    border-left: 4px solid #3f51b5;
+}
+
+.recommendation-card.buy {
+    border-left-color: #4caf50;
+}
+
+.recommendation-card.sell {
+    border-left-color: #f44336;
+}

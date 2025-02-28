@@ -1,0 +1,45 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # Build API Gateway image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-python-images/tradinglab-api-gateway:$COMMIT_SHA', '-f', 'gateway/Dockerfile', '.']
+
+  # Push API Gateway image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-python-images/tradinglab-api-gateway:$COMMIT_SHA']
+
+  # Build UI image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-images/tradinglab-ui:$COMMIT_SHA', '-f', 'ui/Dockerfile', '.']
+
+  # Push UI image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-images/tradinglab-ui:$COMMIT_SHA']
+
+  # Update deployment image for API Gateway
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/api-gateway'
+      - 'api-gateway=us-central1-docker.pkg.dev/$PROJECT_ID/docker-python-images/tradinglab-api-gateway:$COMMIT_SHA'
+    env:
+      - 'CLOUDSDK_COMPUTE_ZONE=us-central1-a'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=financetracker-cluster'
+
+  # Update deployment image for UI
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/tradinglab-ui'
+      - 'tradinglab-ui=us-central1-docker.pkg.dev/$PROJECT_ID/docker-images/tradinglab-ui:$COMMIT_SHA'
+    env:
+      - 'CLOUDSDK_COMPUTE_ZONE=us-central1-a'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=financetracker-cluster'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-python-images/tradinglab-api-gateway:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/docker-images/tradinglab-ui:$COMMIT_SHA'

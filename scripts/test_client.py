@@ -27,8 +27,8 @@ sys.path.insert(0, os.path.join(project_root, 'proto'))
 
 try:
     # Import the generated gRPC classes
-    import trading_pb2
-    import trading_pb2_grpc
+    import proto.trading_pb2 as trading_pb2
+    import proto.trading_pb2_grpc as trading_pb2_grpc
 except ImportError:
     logger.error("Could not import proto files. Make sure they have been generated.")
     logger.error("Run 'python scripts/generate_proto.py' to generate them.")
