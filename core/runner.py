@@ -20,7 +20,7 @@ class StrategyRunner:
         self.recommender = recommender or OptionsRecommender()
         self.visualizer = visualizer or Visualizer()
 
-    def run(self, ticker, days=30, visualize=True, save_recommendations=True):
+    def run(self, ticker, days=30, visualize=True, save_recommendations=True, interval=None):
         """
         Run the strategy for a ticker
 
@@ -29,12 +29,13 @@ class StrategyRunner:
         days (int): Historical data days to analyze
         visualize (bool): Whether to visualize results
         save_recommendations (bool): Whether to save recommendations to file
+        interval (str): Time interval for historical data (e.g., '15min')
 
         Returns:
         tuple: (DataFrame with signals, list of option recommendations)
         """
-        # Step 1: Get historical data
-        df = self.data_provider.get_historical_data(ticker, days)
+        # Step 1: Get historical data with specified interval
+        df = self.data_provider.get_historical_data(ticker, days, interval)
         if df is None:
             return None, []
 

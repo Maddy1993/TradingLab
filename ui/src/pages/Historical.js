@@ -29,6 +29,7 @@ const Historical = () => {
   const [loading, setLoading] = useState(false);
   const [ticker, setTicker] = useState(localStorage.getItem('selectedTicker') || 'SPY');
   const [days, setDays] = useState(30);
+  const [timeRange, setTimeRange] = useState('15M');
   const [historicalData, setHistoricalData] = useState([]);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
@@ -48,15 +49,15 @@ const Historical = () => {
 
   // Fetch data when ticker or days change
   useEffect(() => {
-    fetchHistoricalData();
+    fetchHistoricalData(timeRange);
   }, [ticker]);
 
-  const fetchHistoricalData = async () => {
+  const fetchHistoricalData = async (range = timeRange) => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await axios.get(`/api/historical-data?ticker=${ticker}&days=${days}`);
+      const response = await axios.get(`/api/historical-data?ticker=${ticker}&days=${days}&interval=${range}`);
       setHistoricalData(response.data);
     } catch (error) {
       console.error('Error fetching historical data:', error);
@@ -68,6 +69,11 @@ const Historical = () => {
 
   const handleDaysChange = (event) => {
     setDays(event.target.value);
+  };
+
+  const handleRangeChange = (newRange) => {
+    setTimeRange(newRange);
+    fetchHistoricalData(newRange);
   };
 
   const handleChangePage = (event, newPage) => {
@@ -152,7 +158,7 @@ const Historical = () => {
               <Button
                   variant="contained"
                   fullWidth
-                  onClick={fetchHistoricalData}
+                  onClick={() => fetchHistoricalData(timeRange)}
               >
                 Fetch Data
               </Button>
@@ -200,7 +206,11 @@ const Historical = () => {
                     </Grid>
 
                     <Paper sx={{ mb: 3 }}>
-                      <TradingViewChart data={historicalData} />
+                      <TradingViewChart
+                          data={historicalData}
+                          initialRange={timeRange}
+                          onRangeChange={handleRangeChange}
+                      />
                     </Paper>
 
                     <Paper>

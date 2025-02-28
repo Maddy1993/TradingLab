@@ -16,7 +16,7 @@ spec:
         - name: gcr-json-key
       containers:
         - name: tradinglab-ui
-          image: us-central1-docker.pkg.dev/financetracker-451021/tradinglab-ui/tradinglab-ui:v1.0.1
+          image: us-central1-docker.pkg.dev/financetracker-451021/tradinglab-ui/tradinglab-ui:v1.0.6
           ports:
             - containerPort: 80
           resources:

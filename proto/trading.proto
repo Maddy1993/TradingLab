@@ -24,6 +24,7 @@ service TradingService {
 message HistoricalDataRequest {
   string ticker = 1;
   int32 days = 2; // Number of days of historical data
+  string interval = 3; // Candle interval (1min, 5min, etc.)
 }
 
 // Response containing historical data
@@ -46,6 +47,7 @@ message SignalRequest {
   string ticker = 1;
   int32 days = 2;
   string strategy = 3; // Strategy name (e.g., "RedCandle")
+  string interval = 4; // Candle interval (1min, 5min, etc.)
 }
 
 // Response containing signals
@@ -66,9 +68,10 @@ message BacktestRequest {
   string ticker = 1;
   int32 days = 2;
   string strategy = 3;
-  repeated double profit_targets = 4; // Profit targets in percentage
-  repeated double risk_reward_ratios = 5; // Risk-reward ratios
-  repeated double profit_targets_dollar = 6; // Profit targets in dollars
+  string interval = 4; // Candle interval (1min, 5min, etc.)
+  repeated double profit_targets = 5; // Profit targets in percentage
+  repeated double risk_reward_ratios = 6; // Risk-reward ratios
+  repeated double profit_targets_dollar = 7; // Profit targets in dollars
 }
 
 // Response containing backtest results
@@ -94,6 +97,7 @@ message RecommendationRequest {
   string ticker = 1;
   int32 days = 2;
   string strategy = 3;
+  string interval = 4; // Candle interval (1min, 5min, etc.)
 }
 
 // Response containing options recommendations

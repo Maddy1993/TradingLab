@@ -1,6 +1,3 @@
-// This fix modifies the Dashboard.js component to handle API failures gracefully
-// by making each data fetch independent and providing fallbacks when data is unavailable
-
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
@@ -24,6 +21,7 @@ const Dashboard = () => {
   const [ticker, setTicker] = useState(localStorage.getItem('selectedTicker') || 'SPY');
 
   // State for each data section
+  const [timeRange, setTimeRange] = useState('15M');
   const [historicalData, setHistoricalData] = useState([]);
   const [historicalLoading, setHistoricalLoading] = useState(true);
   const [historicalError, setHistoricalError] = useState(null);
@@ -31,10 +29,6 @@ const Dashboard = () => {
   const [signals, setSignals] = useState([]);
   const [signalsLoading, setSignalsLoading] = useState(true);
   const [signalsError, setSignalsError] = useState(null);
-
-  // Separate state for recommendations and backtests
-  const [loadingBacktests, setLoadingBacktests] = useState(false);
-  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
 
   // Listen for ticker changes from Navbar
   useEffect(() => {
@@ -50,37 +44,42 @@ const Dashboard = () => {
 
   // Fetch essential data (historical data and signals) for dashboard
   useEffect(() => {
-    const fetchEssentialData = async () => {
-      setHistoricalLoading(true);
-      setSignalsLoading(true);
-      setHistoricalError(null);
-      setSignalsError(null);
-
-      try {
-        // Fetch historical data
-        const historicalResponse = await axios.get(`/api/historical-data?ticker=${ticker}&days=30`);
-        setHistoricalData(historicalResponse.data);
-      } catch (error) {
-        console.error('Error fetching historical data:', error);
-        setHistoricalError('Failed to load historical data.');
-      } finally {
-        setHistoricalLoading(false);
-      }
-
-      try {
-        // Fetch signals data
-        const signalsResponse = await axios.get(`/api/signals?ticker=${ticker}&days=30&strategy=RedCandle`);
-        setSignals(signalsResponse.data);
-      } catch (error) {
-        console.error('Error fetching signals data:', error);
-        setSignalsError('Failed to load signals data.');
-      } finally {
-        setSignalsLoading(false);
-      }
-    };
-
-    fetchEssentialData();
+    fetchEssentialData(timeRange);
   }, [ticker]);
+
+  const fetchEssentialData = async (range = timeRange) => {
+    setHistoricalLoading(true);
+    setSignalsLoading(true);
+    setHistoricalError(null);
+    setSignalsError(null);
+
+    try {
+      // Fetch historical data
+      const historicalResponse = await axios.get(`/api/historical-data?ticker=${ticker}&days=30&interval=${range}`);
+      setHistoricalData(historicalResponse.data);
+    } catch (error) {
+      console.error('Error fetching historical data:', error);
+      setHistoricalError('Failed to load historical data.');
+    } finally {
+      setHistoricalLoading(false);
+    }
+
+    try {
+      // Fetch signals data
+      const signalsResponse = await axios.get(`/api/signals?ticker=${ticker}&days=30&strategy=RedCandle&interval=${range}`);
+      setSignals(signalsResponse.data);
+    } catch (error) {
+      console.error('Error fetching signals data:', error);
+      setSignalsError('Failed to load signals data.');
+    } finally {
+      setSignalsLoading(false);
+    }
+  };
+
+  const handleRangeChange = (newRange) => {
+    setTimeRange(newRange);
+    fetchEssentialData(newRange);
+  };
 
   // Render historical data section
   const renderHistoricalSection = () => {
@@ -110,7 +109,12 @@ const Dashboard = () => {
             {ticker} Price Chart
           </Typography>
           <Divider sx={{ mb: 2 }} />
-          <TradingViewChart data={historicalData} signals={signals} />
+          <TradingViewChart
+              data={historicalData}
+              signals={signals}
+              initialRange={timeRange}
+              onRangeChange={handleRangeChange}
+          />
         </Paper>
     );
   };

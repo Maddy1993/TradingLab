@@ -80,11 +80,12 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
         try:
             ticker = request.ticker
             days = request.days
+            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
 
-            logger.info(f"Getting historical data for {ticker}, {days} days")
+            logger.info(f"Getting historical data for {ticker}, {days} days, interval {interval}")
 
             # Get data from provider
-            df = self.data_provider.get_historical_data(ticker, days)
+            df = self.data_provider.get_historical_data(ticker, days, interval)
 
             if df is None:
                 context.set_code(grpc.StatusCode.INTERNAL)
@@ -117,8 +118,9 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
+            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
 
-            logger.info(f"Generating signals for {ticker}, strategy: {strategy_name}")
+            logger.info(f"Generating signals for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -127,7 +129,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 return trading_pb2.SignalResponse()
 
             # Get data and generate signals
-            df = self.data_provider.get_historical_data(ticker, days)
+            df = self.data_provider.get_historical_data(ticker, days, interval)
 
             if df is None:
                 context.set_code(grpc.StatusCode.INTERNAL)
@@ -167,11 +169,12 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
+            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
             profit_targets = list(request.profit_targets) if request.profit_targets else None
             risk_reward_ratios = list(request.risk_reward_ratios) if request.risk_reward_ratios else None
             profit_targets_dollar = list(request.profit_targets_dollar) if request.profit_targets_dollar else None
 
-            logger.info(f"Running backtest for {ticker}, strategy: {strategy_name}")
+            logger.info(f"Running backtest for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -180,7 +183,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 return trading_pb2.BacktestResponse()
 
             # Get data and generate signals
-            df = self.data_provider.get_historical_data(ticker, days)
+            df = self.data_provider.get_historical_data(ticker, days, interval)
 
             if df is None:
                 context.set_code(grpc.StatusCode.INTERNAL)
@@ -236,8 +239,9 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
+            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
 
-            logger.info(f"Getting options recommendations for {ticker}, strategy: {strategy_name}")
+            logger.info(f"Getting options recommendations for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -253,7 +257,8 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                     ticker=ticker,
                     days=days,
                     visualize=False,
-                    save_recommendations=False
+                    save_recommendations=False,
+                    interval=interval
             )
 
             if df is None:

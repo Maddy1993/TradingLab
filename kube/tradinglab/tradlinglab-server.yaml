@@ -16,7 +16,7 @@ spec:
         - name: gcr-json-key
       containers:
         - name: tradinglab-service
-          image: us-central1-docker.pkg.dev/financetracker-451021/docker-python-images/tradinglab:v2
+          image: us-central1-docker.pkg.dev/financetracker-451021/docker-python-images/tradinglab:v2.1
           ports:
             - containerPort: 50052
           env:

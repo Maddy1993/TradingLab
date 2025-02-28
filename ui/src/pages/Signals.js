@@ -18,10 +18,13 @@ import {
   TableHead,
   TableRow,
   TablePagination,
-  Chip
+  Chip,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import axios from 'axios';
 import { format } from 'date-fns';
 import TradingViewChart from '../components/TradingViewChart';
@@ -32,12 +35,14 @@ const Signals = () => {
   const [loading, setLoading] = useState(false);
   const [ticker, setTicker] = useState(localStorage.getItem('selectedTicker') || 'SPY');
   const [days, setDays] = useState(30);
+  const [timeRange, setTimeRange] = useState('15M');
   const [strategy, setStrategy] = useState('RedCandle');
   const [historicalData, setHistoricalData] = useState([]);
   const [signals, setSignals] = useState([]);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [focusedSignal, setFocusedSignal] = useState(null);
 
   // Listen for ticker changes
   useEffect(() => {
@@ -53,18 +58,18 @@ const Signals = () => {
 
   // Fetch data when ticker or days change
   useEffect(() => {
-    fetchData();
+    fetchData(timeRange);
   }, [ticker]);
 
-  const fetchData = async () => {
+  const fetchData = async (range = timeRange) => {
     setLoading(true);
     setError(null);
 
     try {
       // Fetch data in parallel
       const [historicalResponse, signalsResponse] = await Promise.all([
-        axios.get(`/api/historical-data?ticker=${ticker}&days=${days}`),
-        axios.get(`/api/signals?ticker=${ticker}&days=${days}&strategy=${strategy}`)
+        axios.get(`/api/historical-data?ticker=${ticker}&days=${days}&interval=${range}`),
+        axios.get(`/api/signals?ticker=${ticker}&days=${days}&strategy=${strategy}&interval=${range}`)
       ]);
 
       setHistoricalData(historicalResponse.data);
@@ -81,6 +86,11 @@ const Signals = () => {
     setDays(event.target.value);
   };
 
+  const handleRangeChange = (newRange) => {
+    setTimeRange(newRange);
+    fetchData(newRange);
+  };
+
   const handleStrategyChange = (event) => {
     setStrategy(event.target.value);
   };
@@ -92,6 +102,15 @@ const Signals = () => {
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
+  };
+
+  const handleViewOnChart = (signal) => {
+    setFocusedSignal(signal);
+    // Scroll to chart section
+    const chartElement = document.getElementById('chart-section');
+    if (chartElement) {
+      chartElement.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   // Format signals for table display
@@ -156,7 +175,7 @@ const Signals = () => {
               <Button
                   variant="contained"
                   fullWidth
-                  onClick={fetchData}
+                  onClick={() => fetchData(timeRange)}
               >
                 Generate
               </Button>
@@ -177,12 +196,18 @@ const Signals = () => {
               <SignalSummary signals={signals} loading={false} />
 
               {historicalData.length > 0 && (
-                  <Paper sx={{ p: 2, mb: 3 }}>
+                  <Paper sx={{ p: 2, mb: 3 }} id="chart-section">
                     <Typography variant="h6" gutterBottom>
                       Price Chart with Signals
                     </Typography>
                     <Divider sx={{ mb: 2 }} />
-                    <TradingViewChart data={historicalData} signals={signals} />
+                    <TradingViewChart
+                        data={historicalData}
+                        signals={signals}
+                        initialRange={timeRange}
+                        onRangeChange={handleRangeChange}
+                        focusedSignal={focusedSignal}
+                    />
                   </Paper>
               )}
 
@@ -196,6 +221,7 @@ const Signals = () => {
                         <TableCell align="right">Entry Price</TableCell>
                         <TableCell align="right">Stop Loss</TableCell>
                         <TableCell align="right">Risk (%)</TableCell>
+                        <TableCell align="center">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -220,12 +246,23 @@ const Signals = () => {
                                   <TableCell align="right">${row.entry_price.toFixed(2)}</TableCell>
                                   <TableCell align="right">${row.stoploss.toFixed(2)}</TableCell>
                                   <TableCell align="right">{riskPercent}%</TableCell>
+                                  <TableCell align="center">
+                                    <Tooltip title="View on Chart">
+                                      <IconButton
+                                          size="small"
+                                          color="primary"
+                                          onClick={() => handleViewOnChart(row)}
+                                      >
+                                        <VisibilityIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </TableCell>
                                 </TableRow>
                             );
                           })
                       ) : (
                           <TableRow>
-                            <TableCell colSpan={5} align="center">
+                            <TableCell colSpan={6} align="center">
                               No signals generated for the selected period
                             </TableCell>
                           </TableRow>

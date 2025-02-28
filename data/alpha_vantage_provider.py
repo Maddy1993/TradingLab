@@ -15,41 +15,78 @@ class AlphaVantageDataProvider(DataProvider):
 
         Parameters:
         api_key (str): Alpha Vantage API key (if None, will try to get from environment variable)
-        interval (str): Interval for intraday data (1min, 5min, 15min, 30min, 60min)
+        interval (str): Default interval for intraday data (1min, 5min, 15min, 30min, 60min)
         """
         self.api_key = api_key or os.getenv('ALPHA_VANTAGE_API_KEY')
         if not self.api_key:
             raise ValueError("Alpha Vantage API key is required. Provide it as a parameter or set ALPHA_VANTAGE_API_KEY environment variable.")
 
         self.base_url = "https://www.alphavantage.co/query"
-        self.interval = interval
+        self.default_interval = interval
 
-    def get_historical_data(self, ticker, days=30):
+    def get_historical_data(self, ticker, days=30, interval=None):
         """
         Get historical intraday stock data for a given ticker using Alpha Vantage API
 
         Parameters:
         ticker (str): Stock ticker symbol
         days (int): Number of days of historical data to retrieve
+        interval (str): Interval for intraday data (1min, 5min, 15min, 30min, 60min)
+                       If None, uses default interval from initialization
 
         Returns:
         pandas.DataFrame: Historical data with OHLCV columns
         """
+        # Use provided interval or fall back to default
+        used_interval = interval or self.default_interval
+
+        # Convert UI-friendly interval format to Alpha Vantage format if needed
+        interval_mapping = {
+            '1M': '1min',
+            '5M': '5min',
+            '15M': '15min',
+            '30M': '30min',
+            '1H': '60min',
+            '2H': '120min',  # Alpha Vantage doesn't support this directly
+            '4H': '240min',  # Alpha Vantage doesn't support this directly
+            '1D': 'daily'
+        }
+
+        # Check if the interval is in our UI-friendly format and convert if needed
+        if used_interval in interval_mapping:
+            used_interval = interval_mapping[used_interval]
+
+        # Handle special cases for intervals Alpha Vantage doesn't directly support
+        if used_interval in ['120min', '240min']:
+            # For these intervals, we'll need to get smaller intervals and aggregate
+            print(f"Note: Alpha Vantage doesn't directly support {used_interval}. Using 60min data and will aggregate.")
+            used_interval = '60min'
+            need_aggregation = True
+        else:
+            need_aggregation = False
+
         # Define API parameters
+        function = 'TIME_SERIES_INTRADAY' if used_interval != 'daily' else 'TIME_SERIES_DAILY'
+
         params = {
-            'function': 'TIME_SERIES_INTRADAY',
+            'function': function,
             'symbol': ticker,
-            'interval': self.interval,
             'outputsize': 'full',  # Get full data
             'apikey': self.api_key,
             'datatype': 'json',
             'adjusted': 'true',
             'extended_hours': 'false',
-            'month' : "2025-02"
         }
+
+        # Add interval only for intraday data
+        if function == 'TIME_SERIES_INTRADAY':
+            params['interval'] = used_interval
+            # For recent month data - adjust as needed
+            params['month'] = datetime.now().strftime('%Y-%m')
 
         try:
             # Make request to Alpha Vantage API
+            print(f"Requesting data from Alpha Vantage for {ticker} with interval {used_interval}")
             response = requests.get(self.base_url, params=params)
             response.raise_for_status()
             data = response.json()
@@ -59,7 +96,7 @@ class AlphaVantageDataProvider(DataProvider):
                 raise ValueError(f"Alpha Vantage API error: {data['Error Message']}")
 
             # Extract time series data
-            time_series_key = f"Time Series ({self.interval})"
+            time_series_key = f"Time Series ({used_interval})" if function == 'TIME_SERIES_INTRADAY' else "Time Series (Daily)"
             if time_series_key not in data:
                 raise ValueError(f"No time series data found. Available keys: {data.keys()}")
 
@@ -104,6 +141,41 @@ class AlphaVantageDataProvider(DataProvider):
                     first_idx = df.index[day_mask][0]
                     df.loc[first_idx, 'is_first_candle'] = True
 
+            # If we need to aggregate to 2H or 4H intervals
+            if need_aggregation and interval in ['120min', '240min']:
+                # Calculate how many 60min bars to aggregate
+                bars_per_group = 2 if interval == '120min' else 4
+
+                # Implement resampling
+                # This is a simplified approach - a more robust implementation would handle
+                # incomplete groups at day boundaries, etc.
+                print(f"Aggregating 60min data to {interval}")
+
+                # Reset index to make datetime accessible as a column
+                df = df.reset_index()
+
+                # Group by date and then by groups of bars_per_group
+                df['group'] = df.groupby('date').cumcount() // bars_per_group
+
+                # Aggregate within each date and group
+                aggregated = df.groupby(['date', 'group']).agg({
+                    'index': 'first',  # Use first timestamp
+                    'open': 'first',   # Use first open
+                    'high': 'max',     # Use highest high
+                    'low': 'min',      # Use lowest low
+                    'close': 'last',   # Use last close
+                    'volume': 'sum',   # Sum the volume
+                    'is_first_candle': 'first'  # Keep first candle flag
+                }).reset_index()
+
+                # Restore datetime index
+                aggregated = aggregated.set_index('index')
+
+                # Clean up
+                del aggregated['group']
+
+                df = aggregated
+
             return df
 
         except requests.exceptions.RequestException as e:
@@ -113,6 +185,7 @@ class AlphaVantageDataProvider(DataProvider):
             print(f"Error processing Alpha Vantage data: {e}")
             return None
 
+    # Rest of the class remains unchanged
     def get_options_data(self, ticker, days_to_expiration=30, strike_count=5):
         """
         Get options data for a given ticker using Alpha Vantage API

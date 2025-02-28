@@ -46,6 +46,21 @@ def get_grpc_stub():
     channel = grpc.insecure_channel(TRADINGLAB_ADDRESS)
     return trading_pb2_grpc.TradingServiceStub(channel)
 
+# Map frontend interval to backend interval format
+def map_interval(interval):
+    """Map frontend interval format to backend format"""
+    interval_mapping = {
+        '1M': '1min',
+        '5M': '5min',
+        '15M': '15min',
+        '30M': '30min',
+        '1H': '60min',
+        '2H': '120min',
+        '4H': '240min',
+        '1D': 'daily'
+    }
+    return interval_mapping.get(interval, '15min')
+
 # API Routes
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -73,9 +88,17 @@ def get_historical_data():
     try:
         ticker = request.args.get('ticker', 'SPY')
         days = int(request.args.get('days', 30))
+        interval = request.args.get('interval', '15M')  # Default to 15 minute candles
+
+        # Map frontend interval to backend interval format
+        backend_interval = map_interval(interval)
 
         stub = get_grpc_stub()
-        request_proto = trading_pb2.HistoricalDataRequest(ticker=ticker, days=days)
+        request_proto = trading_pb2.HistoricalDataRequest(
+                ticker=ticker,
+                days=days,
+                interval=backend_interval
+        )
         response = stub.GetHistoricalData(request_proto)
 
         # Convert protobuf to JSON-serializable format
@@ -102,12 +125,17 @@ def get_signals():
         ticker = request.args.get('ticker', 'SPY')
         days = int(request.args.get('days', 30))
         strategy = request.args.get('strategy', 'RedCandle')
+        interval = request.args.get('interval', '15M')  # New parameter for time interval
+
+        # Map frontend interval to backend interval format
+        backend_interval = map_interval(interval)
 
         stub = get_grpc_stub()
         request_proto = trading_pb2.SignalRequest(
                 ticker=ticker,
                 days=days,
-                strategy=strategy
+                strategy=strategy,
+                interval=backend_interval
         )
         response = stub.GenerateSignals(request_proto)
 
@@ -133,6 +161,10 @@ def run_backtest():
         ticker = request.args.get('ticker', 'SPY')
         days = int(request.args.get('days', 30))
         strategy = request.args.get('strategy', 'RedCandle')
+        interval = request.args.get('interval', '15M')  # Time interval parameter
+
+        # Map frontend interval to backend interval
+        backend_interval = map_interval(interval)
 
         # Parse profit targets (comma-separated list)
         profit_targets_str = request.args.get('profit_targets', '')
@@ -151,6 +183,7 @@ def run_backtest():
                 ticker=ticker,
                 days=days,
                 strategy=strategy,
+                interval=backend_interval,
                 profit_targets=profit_targets,
                 risk_reward_ratios=rr_ratios,
                 profit_targets_dollar=dollar_targets
@@ -184,12 +217,17 @@ def get_recommendations():
         ticker = request.args.get('ticker', 'SPY')
         days = int(request.args.get('days', 30))
         strategy = request.args.get('strategy', 'RedCandle')
+        interval = request.args.get('interval', '15M')  # Time interval parameter
+
+        # Map frontend interval to backend interval
+        backend_interval = map_interval(interval)
 
         stub = get_grpc_stub()
         request_proto = trading_pb2.RecommendationRequest(
                 ticker=ticker,
                 days=days,
-                strategy=strategy
+                strategy=strategy,
+                interval=backend_interval
         )
         response = stub.GetOptionsRecommendations(request_proto)
 

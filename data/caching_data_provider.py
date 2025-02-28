@@ -32,22 +32,30 @@ class CachingDataProvider:
         os.makedirs(self.historical_cache_dir, exist_ok=True)
         os.makedirs(self.options_cache_dir, exist_ok=True)
 
-    def get_historical_data(self, ticker, days=30):
+    def get_historical_data(self, ticker, days=30, interval='15min'):
         """
         Get historical data with caching
+
+        Parameters:
+        ticker (str): Stock ticker symbol
+        days (int): Number of days of historical data to retrieve
+        interval (str): Time interval for candles (e.g., '1min', '5min', '15min')
+
+        Returns:
+        pandas.DataFrame: Historical price data
         """
-        # Create a cache key based on ticker and days
-        cache_key = f"{ticker}_{days}"
+        # Create a cache key based on ticker, days, and interval
+        cache_key = f"{ticker}_{days}_{interval}"
         cache_file = self.historical_cache_dir / f"{cache_key}.pkl"
 
         # Check if cached data exists and is still valid
         if self._is_cache_valid(cache_file):
-            print(f"Using cached historical data for {ticker}")
+            print(f"Using cached historical data for {ticker} with interval {interval}")
             return self._load_from_cache(cache_file)
 
         # If no valid cache, get data from the provider
-        print(f"Fetching fresh historical data for {ticker}")
-        data = self.data_provider.get_historical_data(ticker, days)
+        print(f"Fetching fresh historical data for {ticker} with interval {interval}")
+        data = self.data_provider.get_historical_data(ticker, days, interval)
 
         # Cache the result if we got valid data
         if data is not None:
