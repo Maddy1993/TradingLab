@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package trading;
+
+option go_package = "tradinglab/trading";
+// Python package is determined by the output path during compilation
+
+// Main Trading Service
+service TradingService {
+  // Get historical data for a ticker
+  rpc GetHistoricalData(HistoricalDataRequest) returns (HistoricalDataResponse);
+
+  // Generate trading signals based on a strategy
+  rpc GenerateSignals(SignalRequest) returns (SignalResponse);
+
+  // Run a backtest for a specific strategy
+  rpc RunBacktest(BacktestRequest) returns (BacktestResponse);
+
+  // Get options recommendations for a ticker
+  rpc GetOptionsRecommendations(RecommendationRequest) returns (RecommendationResponse);
+}
+
+// Request for historical data
+message HistoricalDataRequest {
+  string ticker = 1;
+  int32 days = 2; // Number of days of historical data
+}
+
+// Response containing historical data
+message HistoricalDataResponse {
+  repeated OHLCV candles = 1;
+}
+
+// OHLCV candle data
+message OHLCV {
+  string date = 1;
+  double open = 2;
+  double high = 3;
+  double low = 4;
+  double close = 5;
+  int64 volume = 6;
+}
+
+// Request for generating signals
+message SignalRequest {
+  string ticker = 1;
+  int32 days = 2;
+  string strategy = 3; // Strategy name (e.g., "RedCandle")
+}
+
+// Response containing signals
+message SignalResponse {
+  repeated Signal signals = 1;
+}
+
+// Trading signal
+message Signal {
+  string date = 1;
+  string signal_type = 2; // LONG or SHORT
+  double entry_price = 3;
+  double stoploss = 4;
+}
+
+// Request for backtesting
+message BacktestRequest {
+  string ticker = 1;
+  int32 days = 2;
+  string strategy = 3;
+  repeated double profit_targets = 4; // Profit targets in percentage
+  repeated double risk_reward_ratios = 5; // Risk-reward ratios
+  repeated double profit_targets_dollar = 6; // Profit targets in dollars
+}
+
+// Response containing backtest results
+message BacktestResponse {
+  map<string, BacktestResult> results = 1;
+}
+
+// Backtest result for a specific configuration
+message BacktestResult {
+  double win_rate = 1;
+  double profit_factor = 2;
+  double total_return = 3;
+  double total_return_pct = 4;
+  int32 total_trades = 5;
+  int32 winning_trades = 6;
+  int32 losing_trades = 7;
+  double max_drawdown = 8;
+  double max_drawdown_pct = 9;
+}
+
+// Request for options recommendations
+message RecommendationRequest {
+  string ticker = 1;
+  int32 days = 2;
+  string strategy = 3;
+}
+
+// Response containing options recommendations
+message RecommendationResponse {
+  repeated OptionsRecommendation recommendations = 1;
+}
+
+// Options recommendation
+message OptionsRecommendation {
+  string date = 1;
+  string signal_type = 2; // LONG or SHORT
+  double stock_price = 3;
+  double stoploss = 4;
+  string option_type = 5; // CALL or PUT
+  double strike = 6;
+  string expiration = 7;
+  double delta = 8;
+  double iv = 9; // implied volatility
+  double price = 10;
+}

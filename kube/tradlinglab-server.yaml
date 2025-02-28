@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradinglab-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradinglab-service
+  template:
+    metadata:
+      labels:
+        app: tradinglab-service
+    spec:
+      imagePullSecrets:
+        - name: gcr-json-key
+      containers:
+        - name: tradinglab-service
+          image: us-central1-docker.pkg.dev/financetracker-451021/docker-python-images/tradinglab:v2
+          ports:
+            - containerPort: 50052
+          env:
+            - name: ALPHA_VANTAGE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tradinglab-credentials
+                  key: alpha_vantage_api_key
+            - name: CACHE_DIR
+              value: "/app/data_cache"
+            - name: GRPC_PORT
+              value: "50052"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: data-cache
+              mountPath: /app/data_cache
+      volumes:
+        - name: data-cache
+          emptyDir: {}
