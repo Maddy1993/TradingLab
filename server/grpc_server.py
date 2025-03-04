@@ -212,6 +212,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             response = trading_pb2.BacktestResponse()
 
             for test_name, stats in summary.items():
+                # Create a new BacktestResult message
                 result = trading_pb2.BacktestResult(
                         win_rate=float(stats['win_rate']),
                         profit_factor=float(stats['profit_factor']),
@@ -220,10 +221,11 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                         total_trades=int(stats['total_trades']),
                         winning_trades=int(stats['winning_trades']),
                         losing_trades=int(stats['losing_trades']),
-                        max_drawdown=float(stats['max_drawdown']),
-                        max_drawdown_pct=float(stats['max_drawdown_pct'])
+                        max_drawdown=float(stats.get('max_drawdown', 0)),
+                        max_drawdown_pct=float(stats.get('max_drawdown_pct', 0))
                 )
-                response.results[test_name] = result
+                # Add to the results map
+                response.results[test_name].CopyFrom(result)
 
             return response
 
