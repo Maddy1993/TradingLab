@@ -75,11 +75,6 @@ message BacktestRequest {
 }
 
 // Response containing backtest results
-message BacktestResponse {
-  map<string, BacktestResult> results = 1;
-}
-
-// Backtest result for a specific configuration
 message BacktestResult {
   double win_rate = 1;
   double profit_factor = 2;
@@ -90,6 +85,10 @@ message BacktestResult {
   int32 losing_trades = 7;
   double max_drawdown = 8;
   double max_drawdown_pct = 9;
+}
+
+message BacktestResponse {
+  map<string, BacktestResult> results = 1;
 }
 
 // Request for options recommendations

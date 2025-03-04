@@ -166,13 +166,16 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
     def RunBacktest(self, request, context):
         """Run a backtest for a specific strategy."""
         try:
+            # Extract parameters
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
-            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
-            profit_targets = list(request.profit_targets) if request.profit_targets else None
-            risk_reward_ratios = list(request.risk_reward_ratios) if request.risk_reward_ratios else None
-            profit_targets_dollar = list(request.profit_targets_dollar) if request.profit_targets_dollar else None
+            interval = request.interval if request.interval else '15min'
+
+            # Safely extract lists from repeated fields
+            profit_targets = [pt for pt in request.profit_targets] if request.profit_targets else None
+            risk_reward_ratios = [rr for rr in request.risk_reward_ratios] if request.risk_reward_ratios else None
+            profit_targets_dollar = [pd for pd in request.profit_targets_dollar] if request.profit_targets_dollar else None
 
             logger.info(f"Running backtest for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
@@ -184,7 +187,6 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
 
             # Get data and generate signals
             df = self.data_provider.get_historical_data(ticker, days, interval)
-
             if df is None:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(f"Failed to get historical data for {ticker}")
@@ -201,34 +203,42 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                     profit_targets=profit_targets,
                     risk_reward_ratios=risk_reward_ratios,
                     profit_targets_dollar=profit_targets_dollar,
-                    contracts=2,  # Default to 2 contracts
-                    contract_value=50  # Default to $50 per point
+                    contracts=2,
+                    contract_value=50
             )
 
             # Get summary stats
             summary = backtester.get_summary_stats()
 
-            # Convert to response format
+            # Create a new response
             response = trading_pb2.BacktestResponse()
 
+            # Add results to the map properly
             for test_name, stats in summary.items():
-                result = trading_pb2.BacktestResult(
-                        win_rate=float(stats['win_rate']),
-                        profit_factor=float(stats['profit_factor']),
-                        total_return=float(stats['total_return']),
-                        total_return_pct=float(stats['total_return_pct']),
-                        total_trades=int(stats['total_trades']),
-                        winning_trades=int(stats['winning_trades']),
-                        losing_trades=int(stats['losing_trades']),
-                        max_drawdown=float(stats['max_drawdown']),
-                        max_drawdown_pct=float(stats['max_drawdown_pct'])
-                )
-                response.results[test_name] = result
+                # Access the map entry - this creates a default entry if it doesn't exist
+                result_entry = response.results[test_name]
+
+                # Now set each field individually
+                result_entry.win_rate = float(stats['win_rate'])
+
+                # Handle infinity for profit_factor
+                pf = stats['profit_factor']
+                result_entry.profit_factor = 999999.0 if pf == float('inf') else float(pf)
+
+                result_entry.total_return = float(stats['total_return'])
+                result_entry.total_return_pct = float(stats.get('total_return_pct', 0))
+                result_entry.total_trades = int(stats['total_trades'])
+                result_entry.winning_trades = int(stats['winning_trades'])
+                result_entry.losing_trades = int(stats['losing_trades'])
+                result_entry.max_drawdown = float(stats.get('max_drawdown', 0))
+                result_entry.max_drawdown_pct = float(stats.get('max_drawdown_pct', 0))
 
             return response
 
         except Exception as e:
             logger.error(f"Error in RunBacktest: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())  # Add stack trace for better debugging
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return trading_pb2.BacktestResponse()
