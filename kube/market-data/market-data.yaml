@@ -1,4 +1,4 @@
-# k8s/market-data-service.yaml
+# kube/market-data/market-data.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,11 +23,22 @@ spec:
                 configMapKeyRef:
                   name: events-config
                   key: nats-url
-            - name: ALPHA_VANTAGE_API_KEY
+            - name: ALPACA_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: tradinglab-credentials
-                  key: alpha_vantage_api_key
+                  key: alpaca_api_key
+            - name: ALPACA_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tradinglab-credentials
+                  key: alpaca_api_secret
+            - name: ALPACA_LIVE_TRADING
+              value: "false"
+            - name: POLLING_INTERVAL
+              value: "60s"
+            - name: WATCH_TICKERS
+              value: "SPY,AAPL,MSFT,GOOGL,AMZN"
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
@@ -40,6 +51,22 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service

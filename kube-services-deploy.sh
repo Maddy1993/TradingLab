@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh - Script to deploy TradingLab event system to Kubernetes
+# kube-services-deploy.sh - Script to deploy TradingLab event system to Kubernetes
 
 set -e  # Exit on error
 
@@ -19,18 +19,10 @@ kubectl apply -f kube/nats/nats-deployment.yaml
 if ! kubectl get secret tradinglab-credentials -n $NAMESPACE > /dev/null 2>&1; then
     echo "Creating credentials secret..."
 
-    # Check if API key is set
-    if [ -z "$ALPHA_VANTAGE_API_KEY" ]; then
-        echo "ERROR: ALPHA_VANTAGE_API_KEY environment variable is not set"
-        echo "Please set it before running this script:"
-        echo "export ALPHA_VANTAGE_API_KEY=your-api-key"
-        exit 1
-    fi
-
     # Create secret
     kubectl create secret generic tradinglab-credentials \
         --namespace $NAMESPACE \
-        --from-literal=alpha_vantage_api_key=$ALPHA_VANTAGE_API_KEY
+        --from-file=kube/market-data/alpaca_secret.yaml
 
     echo "Secret created."
 else
@@ -46,15 +38,28 @@ echo "Waiting for NATS server to be ready..."
 kubectl rollout status statefulset/nats -n $NAMESPACE --timeout=120s
 
 # Deploy event components
-echo "Deploying event components..."
-for component in event-client market-data-service event-hub; do
-    echo "Deploying $component..."
-    envsubst < kube/$component.yaml | kubectl apply -f -
-done
+echo "Deploying event client..."
+envsubst < kube/event-client/event-client.yaml | kubectl apply -f -
+
+echo "Deploying market data service..."
+envsubst < kube/market-data/market-data.yaml | kubectl apply -f -
+
+echo "Deploying event hub..."
+envsubst < kube/event-hub/event-hub.yaml | kubectl apply -f -
+
+# Deploy API components
+echo "Deploying API gateway..."
+envsubst < kube/ui/api-gateway-deployment.yaml | kubectl apply -f -
+
+echo "Deploying tradinglab service..."
+envsubst < kube/tradinglab/tradinglab-server.yaml | kubectl apply -f -
+
+echo "Deploying UI..."
+envsubst < kube/ui/ui-deployment.yaml | kubectl apply -f -
 
 # Wait for deployments to be ready
 echo "Waiting for deployments to be ready..."
-for component in event-client market-data-service event-hub; do
+for component in event-client market-data-service event-hub api-gateway tradinglab-service tradinglab-ui; do
     kubectl rollout status deployment/$component -n $NAMESPACE --timeout=120s
 done
 

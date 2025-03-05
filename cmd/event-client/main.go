@@ -12,6 +12,17 @@ import (
 	"github.com/myapp/tradinglab/pkg/events"
 )
 
+func init() {
+	// Set timezone to PST
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		log.Printf("Failed to load PST timezone: %v", err)
+		return
+	}
+	time.Local = loc
+	log.SetFlags(log.LstdFlags | log.LUTC)
+}
+
 func main() {
 	// Get NATS URL from environment or use default
 	natsURL := os.Getenv("NATS_URL")

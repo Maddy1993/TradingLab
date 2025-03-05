@@ -122,48 +122,48 @@ build-tradinglab-service:
 
 # Docker images
 .PHONY: docker-images
-docker-images: docker-event-client docker-market-data-service docker-api-gateway docker-tradinglab-service docker-ui docker-event-hub
+docker-images: docker-event-client docker-market-data-service docker-event-hub docker-api-gateway docker-tradinglab-service docker-ui
 
 # Docker image for event client
 .PHONY: docker-event-client
 docker-event-client:
 	@echo "Building event client Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(EVENT_CLIENT):$(VERSION) -f docker/Dockerfile.event-client .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(EVENT_CLIENT):$(VERSION) -f docker/event-client/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(EVENT_CLIENT):$(VERSION) $(REGISTRY)/$(EVENT_CLIENT):latest
 
 # Docker image for market data service
 .PHONY: docker-market-data-service
 docker-market-data-service:
 	@echo "Building market data service Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION) -f docker/Dockerfile.market-data-service .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION) -f docker/market-data/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION) $(REGISTRY)/$(MARKET_DATA_SERVICE):latest
 
 # Docker image for event hub
 .PHONY: docker-event-hub
 docker-event-hub:
 	@echo "Building event hub Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(EVENT_HUB):$(VERSION) -f docker/Dockerfile.event-hub .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(EVENT_HUB):$(VERSION) -f docker/event-hub/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(EVENT_HUB):$(VERSION) $(REGISTRY)/$(EVENT_HUB):latest
 
 # Docker image for API gateway
 .PHONY: docker-api-gateway
 docker-api-gateway:
 	@echo "Building API gateway Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(API_GATEWAY_SERVICE):$(VERSION) -f docker/gateway/Dockerfile .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(API_GATEWAY_SERVICE):$(VERSION) -f docker/gateway/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(API_GATEWAY_SERVICE):$(VERSION) $(REGISTRY)/$(API_GATEWAY_SERVICE):latest
 
 # Docker image for TradingLab service
 .PHONY: docker-tradinglab-service
 docker-tradinglab-service:
 	@echo "Building TradingLab service Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(TRADINGLAB_SERVICE):$(VERSION) -f docker/server/Dockerfile .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(TRADINGLAB_SERVICE):$(VERSION) -f docker/server/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(TRADINGLAB_SERVICE):$(VERSION) $(REGISTRY)/$(TRADINGLAB_SERVICE):latest
 
 # Docker image for UI
 .PHONY: docker-ui
 docker-ui:
 	@echo "Building UI Docker image..."
-	$(DOCKER_BUILD) -t $(REGISTRY)/$(TRADINGLAB_UI):$(VERSION) -f docker/ui/Dockerfile .
+	$(DOCKER_BUILD) --platform linux/amd64 -t $(REGISTRY)/$(TRADINGLAB_UI):$(VERSION) -f docker/ui/Dockerfile .
 	$(DOCKER) tag $(REGISTRY)/$(TRADINGLAB_UI):$(VERSION) $(REGISTRY)/$(TRADINGLAB_UI):latest
 
 # Push Docker images
@@ -171,6 +171,7 @@ docker-ui:
 docker-push:
 	$(DOCKER) push $(REGISTRY)/$(EVENT_CLIENT):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION)
+	$(DOCKER) push $(REGISTRY)/$(EVENT_HUB):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(API_GATEWAY_SERVICE):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(TRADINGLAB_SERVICE):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(TRADINGLAB_UI):$(VERSION)
@@ -189,12 +190,12 @@ deploy-nats:
 .PHONY: deploy-services
 deploy-services:
 	@echo "Deploying services..."
-	$(KUBECTL) apply -f kube/event-client.yaml
-	$(KUBECTL) apply -f kube/market-data-service.yaml
+	$(KUBECTL) apply -f kube/event-client/event-client.yaml
+	$(KUBECTL) apply -f kube/market-data/market-data-service.yaml
+	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
 	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
 	$(KUBECTL) apply -f kube/tradinglab/tradinglab-server.yaml
 	$(KUBECTL) apply -f kube/ui/ui-deployment.yaml
-	$(KUBECTL) apply -f kube/event-hub/ui-deployment.yaml
 
 # Test
 .PHONY: test
@@ -211,7 +212,7 @@ test-go:
 test-python:
 	@echo "Testing Python code..."
 	@if [ -d "tests" ]; then \
-		. venv/bin/activate && python -m pytest tests/; \
+		python -m pytest tests/; \
 	else \
 		echo "Tests directory not found, skipping..."; \
 	fi
