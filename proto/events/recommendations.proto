@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package tradinglab.events;
+
+option go_package = "github.com/yourusername/tradinglab/pkg/events";
+
+message RecommendationEvent {
+  string ticker = 1;
+  string timestamp = 2;
+  string strategy = 3;
+  string option_type = 4; // "CALL" or "PUT"
+  double strike_price = 5;
+  string expiration = 6;
+  double implied_volatility = 7;
+  double recommendation_price = 8;
+  map<string, string> metadata = 9;
+}

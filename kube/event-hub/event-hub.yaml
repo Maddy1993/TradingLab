@@ -1,0 +1,62 @@
+# k8s/event-hub.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-hub
+  namespace: tradinglab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: event-hub
+  template:
+    metadata:
+      labels:
+        app: event-hub
+    spec:
+      containers:
+        - name: event-hub
+          image: ${REGISTRY}/event-hub:${VERSION}
+          env:
+            - name: NATS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: nats-url
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: events-log-level
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-hub
+  namespace: tradinglab
+spec:
+  selector:
+    app: event-hub
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP

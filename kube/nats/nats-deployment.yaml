@@ -1,0 +1,78 @@
+# k8s/nats-deployment.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: tradinglab
+spec:
+  serviceName: nats
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.9.15-alpine
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 6222
+              name: cluster
+            - containerPort: 8222
+              name: monitor
+          command:
+            - "nats-server"
+            - "--jetstream"
+            - "--store_dir=/data"
+          volumeMounts:
+            - name: nats-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: tradinglab
+spec:
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: cluster
+      port: 6222
+      targetPort: 6222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+  clusterIP: None
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: events-config
+  namespace: tradinglab
+data:
+  nats-url: nats://nats:4222
+  events-log-level: info

@@ -1,0 +1,50 @@
+# k8s/event-client.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-client
+  namespace: tradinglab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-client
+  template:
+    metadata:
+      labels:
+        app: event-client
+    spec:
+      containers:
+        - name: event-client
+          image: ${REGISTRY}/event-client:${VERSION}
+          env:
+            - name: NATS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: nats-url
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: events-log-level
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-client
+  namespace: tradinglab
+spec:
+  selector:
+    app: event-client
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP

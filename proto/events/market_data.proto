@@ -1,0 +1,19 @@
+// proto/events/market_data.proto
+syntax = "proto3";
+
+package tradinglab.events;
+
+option go_package = "github.com/yourusername/tradinglab/events";
+
+message MarketDataEvent {
+  string ticker = 1;
+  string timestamp = 2;
+  double price = 3;
+  double open = 4;
+  double high = 5;
+  double low = 6;
+  double close = 7;
+  int64 volume = 8;
+  string interval = 9; // "1m", "5m", "15m", etc.
+  string source = 10;  // Data source identifier
+}

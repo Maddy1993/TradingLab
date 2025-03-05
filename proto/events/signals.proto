@@ -1,0 +1,16 @@
+// proto/events/signals.proto
+syntax = "proto3";
+
+package tradinglab.events;
+
+option go_package = "github.com/yourusername/tradinglab/events";
+
+message SignalEvent {
+  string ticker = 1;
+  string timestamp = 2;
+  string strategy = 3;
+  string signal_type = 4; // "LONG" or "SHORT"
+  double entry_price = 5;
+  double stop_loss = 6;
+  map<string, string> metadata = 7;
+}
