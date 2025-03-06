@@ -7,6 +7,9 @@ metadata:
     kubernetes.io/ingress.class: "gce"
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      try_files $uri $uri/ /index.html;
+    nginx.ingress.kubernetes.io/single-spa-support: "true"
 spec:
   rules:
     - http:

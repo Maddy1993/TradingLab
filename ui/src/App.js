@@ -79,10 +79,13 @@ function App() {
             >
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/historical" element={<Historical />} />
                 <Route path="/signals" element={<Signals />} />
                 <Route path="/backtest" element={<Backtest />} />
                 <Route path="/recommendations" element={<Recommendations />} />
+                {/* Add a catch-all route that redirects to Dashboard */}
+                <Route path="*" element={<Dashboard />} />
               </Routes>
             </Box>
           </Box>

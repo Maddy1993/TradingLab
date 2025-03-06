@@ -2,6 +2,8 @@
 import json
 import asyncio
 import nats
+import re
+from datetime import datetime
 from nats.js.api import StreamConfig
 from typing import Dict, Any, Callable, Optional, Union, List
 
@@ -104,7 +106,10 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"market-data-consumer-{ticker}")
+        # Sanitize durable name - remove invalid characters
+        safe_ticker = re.sub(r'[.*>]', '-', ticker)
+        durable_name = f"market-data-consumer-{safe_ticker}"
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
         self.subscriptions[subject] = sub
         return sub
 
@@ -124,7 +129,10 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"historical-data-consumer-{ticker}")
+        # Sanitize durable name - remove invalid characters
+        safe_ticker = re.sub(r'[.*>]', '-', ticker)
+        durable_name = f"historical-data-consumer-{safe_ticker}"
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
         self.subscriptions[subject] = sub
         return sub
 
@@ -143,7 +151,10 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"signals-consumer-{ticker}")
+        # Sanitize durable name - remove invalid characters
+        safe_ticker = re.sub(r'[.*>]', '-', ticker)
+        durable_name = f"signals-consumer-{safe_ticker}"
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
         self.subscriptions[subject] = sub
         return sub
 
@@ -162,7 +173,10 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"recommendations-consumer-{ticker}")
+        # Sanitize durable name - remove invalid characters
+        safe_ticker = re.sub(r'[.*>]', '-', ticker)
+        durable_name = f"recommendations-consumer-{safe_ticker}"
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
         self.subscriptions[subject] = sub
         return sub
 

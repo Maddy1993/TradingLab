@@ -67,7 +67,17 @@ class StreamingStrategyAdapter:
 
             # Convert timestamp string to datetime if needed
             if 'timestamp' in df.columns and df['timestamp'].dtype == 'object':
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                try:
+                    # First try ISO format with more flexible parsing
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601')
+                except Exception as e:
+                    logging.warning(f"Error parsing timestamps in ISO8601 format: {e}")
+                    try:
+                        # Fall back to mixed format with flexible parsing
+                        df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+                    except Exception as e:
+                        logging.error(f"Failed to parse timestamps: {e}")
+                        return
 
             # Set index to timestamp if available
             if 'timestamp' in df.columns:
