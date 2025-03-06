@@ -44,6 +44,11 @@ spec:
                   key: nats-url
             - name: WATCH_TICKERS
               value: "SPY,AAPL,MSFT,GOOGL,AMZN"
+            - name: TIMEZONE
+              valueFrom:
+                configMapKeyRef:
+                  name: timezone-config
+                  key: TIMEZONE
           resources:
             requests:
               memory: "256Mi"

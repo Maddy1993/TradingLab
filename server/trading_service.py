@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from strategy import RedCandleStrategy, StreamingStrategyAdapter
 from analysis import OptionsRecommender, StrategyBacktester
 from events.client import EventClient
+from utils.timezone import now, format_datetime, parse_datetime
 
 # Import generated proto files
 from proto import trading_pb2
@@ -118,8 +119,8 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
         await self.event_client.request_historical_data(ticker, days, interval)
 
         # Wait for response with timeout
-        start_time = datetime.now()
-        while (datetime.now() - start_time).total_seconds() < timeout:
+        start_time = now()
+        while (now() - start_time).total_seconds() < timeout:
             if cache_key in self.historical_data_cache:
                 return self.historical_data_cache[cache_key]
             await asyncio.sleep(0.1)
@@ -158,7 +159,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
 
             for index, row in df.iterrows():
                 candle = response.candles.add()
-                candle.date = index.strftime('%Y-%m-%d %H:%M:%S')
+                candle.date = format_datetime(index, '%Y-%m-%d %H:%M:%S')
                 candle.open = float(row['open'])
                 candle.high = float(row['high'])
                 candle.low = float(row['low'])
@@ -213,7 +214,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
 
             for date, row in entry_signals.iterrows():
                 signal = response.signals.add()
-                signal.date = date.strftime('%Y-%m-%d %H:%M:%S')
+                signal.date = format_datetime(date, '%Y-%m-%d %H:%M:%S')
                 signal.signal_type = row['signal_type']
                 signal.entry_price = float(row['close'])
 

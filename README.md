@@ -67,7 +67,10 @@ Create a `.env` file with:
 ALPHA_VANTAGE_API_KEY=your_api_key
 CACHE_DIR=./data_cache
 GRPC_PORT=50052
+TIMEZONE=America/Los_Angeles  # Configure for PST/PDT timezone
 ```
+
+Available timezones follow the [IANA timezone database](https://www.iana.org/time-zones) format (e.g., 'America/New_York', 'Europe/London', 'Asia/Tokyo').
 
 ### Running the Server Locally
 
@@ -88,6 +91,7 @@ Run the container:
 ```bash
 docker run -p 50052:50052 \
   -e ALPHA_VANTAGE_API_KEY=your_api_key \
+  -e TIMEZONE=America/Los_Angeles \
   tradinglab:latest
 ```
 
@@ -107,14 +111,22 @@ docker run -p 50052:50052 \
 kubectl apply -f kube/tradinglab-secret.yaml
 ```
 
-2. Deploy the service:
+2. Apply the timezone configuration:
+
+```bash
+kubectl apply -f kube/config/timezone-config.yaml
+```
+
+3. Deploy the service:
 
 ```bash
 kubectl apply -f kube/tradinglab-server.yaml
 kubectl apply -f kube/tradinglab-service.yaml
 ```
 
-3. Verify deployment:
+You can change the timezone by editing the `kube/config/timezone-config.yaml` file and reapplying it.
+
+4. Verify deployment:
 
 ```bash
 kubectl get pods -l app=tradinglab-service

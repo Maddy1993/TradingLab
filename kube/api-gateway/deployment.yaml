@@ -32,6 +32,11 @@ spec:
               value: ":5000"
             - name: LOG_LEVEL
               value: "info"
+            - name: TIMEZONE
+              valueFrom:
+                configMapKeyRef:
+                  name: timezone-config
+                  key: TIMEZONE
           resources:
             requests:
               memory: "128Mi"

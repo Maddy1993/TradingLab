@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/myapp/tradinglab/pkg/events"
+	"github.com/myapp/tradinglab/pkg/utils"
 )
 
 // EventHub manages the routing, transformation, and coordination of events
@@ -75,7 +76,7 @@ func NewEventHub(client *events.EventClient) *EventHub {
 		requestHandlers: make(map[string]RequestHandler),
 		stats: EventStats{
 			TickerStats: make(map[string]TickerStats),
-			LastUpdated: time.Now(),
+			LastUpdated: utils.Now(),
 		},
 		watchedTickers: []string{},
 		failedStreams:  make(map[string]SubscriptionConfig),
@@ -455,7 +456,7 @@ func (h *EventHub) handleHistoricalDataRequest(ctx context.Context, ticker, time
 		"timeframe":  timeframe,
 		"days":       days,
 		"source":     "event_hub",
-		"timestamp":  time.Now().Format(time.RFC3339),
+		"timestamp":  utils.FormatTime(utils.Now(), time.RFC3339),
 	}
 
 	// Forward the request
@@ -494,7 +495,7 @@ func (h *EventHub) reportStats(ctx context.Context) {
 					activeTickerCount++
 					log.Printf("  %s: Live: %d, Daily: %d, Historical: %d, Signals: %d, Last: %s",
 						ticker, stats.LiveEvents, stats.DailyEvents, stats.HistoricalEvents,
-						stats.SignalEvents, stats.LastEventTime.Format("15:04:05"))
+						stats.SignalEvents, utils.FormatTime(stats.LastEventTime, "15:04:05"))
 				}
 			}
 			h.mu.Unlock()
