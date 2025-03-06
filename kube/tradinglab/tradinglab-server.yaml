@@ -17,7 +17,7 @@ spec:
         - name: gcr-json-key
       containers:
         - name: tradinglab-service
-          image: ${REGISTRY}/tradinglab:${VERSION}
+          image: ${REGISTRY}/tradinglab-service:${VERSION}
           ports:
             - containerPort: 50052
           env:

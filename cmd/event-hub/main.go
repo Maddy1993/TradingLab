@@ -81,47 +81,72 @@ func main() {
 	// Set watched tickers
 	hub.SetWatchedTickers(tickers)
 
-	// Start the event hub with retry
-	var startSuccess bool
+	// Start the event hub with retry for critical components
 	maxRetries := 10
 	retryDelay := 5 * time.Second
+	var lastError error
 
 	for i := 0; i < maxRetries; i++ {
 		err := hub.Start(ctx)
+		lastError = err
+
+		// If no error or only non-critical errors, we can proceed
 		if err == nil {
-			startSuccess = true
-			log.Printf("Event hub started successfully")
+			log.Printf("Event hub started successfully with all streams")
+			break
+		} else if !strings.Contains(err.Error(), "failed to start critical components") {
+			// We had errors but none for critical components
+			log.Printf("Event hub started with some non-critical streams unavailable")
 			break
 		}
 
-		if strings.Contains(err.Error(), "no stream matches subject") {
-			log.Printf("Attempt %d/%d: Required streams not yet available, waiting for services to initialize: %v",
-				i+1, maxRetries, err)
-			select {
-			case <-ctx.Done():
-				break
-			case <-time.After(retryDelay):
-				continue
-			}
-		} else {
-			// If it's a different error, fail immediately
-			log.Fatalf("Failed to start event hub: %v", err)
+		log.Printf("Attempt %d/%d: Required critical streams not yet available, waiting for services to initialize: %v",
+			i+1, maxRetries, err)
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(retryDelay):
+			continue
 		}
 	}
 
-	if !startSuccess {
-		log.Fatalf("Failed to start event hub after %d retries: required streams not available", maxRetries)
+	// Even if we couldn't start critical components after all retries,
+	// just log the warning and continue - the retry mechanism will keep trying
+	if lastError != nil && strings.Contains(lastError.Error(), "failed to start critical components") {
+		log.Printf("Warning: Starting event hub with critical components unavailable. " +
+			"Will continue to retry in the background.")
 	}
 
 	// Setup HTTP server for health checks and API endpoints
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		stats := hub.GetStats()
+		streamStatus := hub.GetStreamStatus()
+
+		// Check if all critical streams are up
+		allCriticalStreamsUp := streamStatus["requests"]
+
+		// Set status based on critical streams
+		status := "DEGRADED"
+		if allCriticalStreamsUp {
+			status = "UP"
+		}
 
 		response := map[string]interface{}{
-			"status":    "UP",
-			"timestamp": time.Now(),
-			"stats":     stats,
+			"status":        status,
+			"timestamp":     time.Now(),
+			"stats":         stats,
+			"streams":       streamStatus,
+			"failedStreams": []string{},
 		}
+
+		// Add list of failed streams for easier monitoring
+		var failedStreams []string
+		for stream, status := range streamStatus {
+			if !status {
+				failedStreams = append(failedStreams, stream)
+			}
+		}
+		response["failedStreams"] = failedStreams
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)

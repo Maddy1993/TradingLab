@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ type EventHub struct {
 	mu              sync.Mutex
 	stats           EventStats
 	watchedTickers  []string
+	failedStreams   map[string]SubscriptionConfig // Tracks failed subscription attempts
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // Subscription represents a subscription to an event stream
@@ -27,6 +31,14 @@ type Subscription struct {
 	Subject  string
 	Handler  func([]byte)
 	Consumer string
+	Active   bool // Whether the subscription is currently active
+}
+
+// SubscriptionConfig holds information needed to retry a subscription
+type SubscriptionConfig struct {
+	Type      string    // Type of subscription (live, daily, historical, signals)
+	Subject   string    // Subject to subscribe to
+	LastRetry time.Time // Last retry timestamp
 }
 
 // RequestHandler defines a function to handle data requests
@@ -56,6 +68,7 @@ type TickerStats struct {
 
 // NewEventHub creates a new event hub
 func NewEventHub(client *events.EventClient) *EventHub {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &EventHub{
 		client:          client,
 		subscriptions:   make([]*Subscription, 0),
@@ -65,43 +78,75 @@ func NewEventHub(client *events.EventClient) *EventHub {
 			LastUpdated: time.Now(),
 		},
 		watchedTickers: []string{},
+		failedStreams:  make(map[string]SubscriptionConfig),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
 // Start initializes the event hub and subscribes to events
 func (h *EventHub) Start(ctx context.Context) error {
-	// Subscribe to all market live data
+	var startupErrors []string
+	var criticalError bool
+
+	// Try to subscribe to all streams, but continue even if some fail
+
+	// Subscribe to market live data
 	if err := h.subscribeToMarketLiveData(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to market live data: %w", err)
+		log.Printf("Warning: failed to subscribe to market live data: %v", err)
+		startupErrors = append(startupErrors, fmt.Sprintf("live data: %v", err))
+		h.registerFailedStream("live", events.SubjectMarketLiveAll)
 	}
 
-	// Subscribe to all market daily data
+	// Subscribe to market daily data
 	if err := h.subscribeToMarketDailyData(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to market daily data: %w", err)
+		log.Printf("Warning: failed to subscribe to market daily data: %v", err)
+		startupErrors = append(startupErrors, fmt.Sprintf("daily data: %v", err))
+		h.registerFailedStream("daily", events.SubjectMarketDailyAll)
 	}
 
-	// Subscribe to all historical data
+	// Subscribe to historical data
 	if err := h.subscribeToHistoricalData(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to historical data: %w", err)
+		log.Printf("Warning: failed to subscribe to historical data: %v", err)
+		startupErrors = append(startupErrors, fmt.Sprintf("historical data: %v", err))
+		h.registerFailedStream("historical", events.SubjectMarketHistoricalAll)
 	}
 
-	// Subscribe to all signals
+	// Subscribe to signals
 	if err := h.subscribeToSignals(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to signals: %w", err)
+		log.Printf("Warning: failed to subscribe to signals: %v", err)
+		startupErrors = append(startupErrors, fmt.Sprintf("signals: %v", err))
+		h.registerFailedStream("signals", events.SubjectSignalsAll)
 	}
 
 	// Register handler for historical data requests
 	h.RegisterRequestHandler("historical", h.handleHistoricalDataRequest)
 
-	// Subscribe to requests
+	// Subscribe to requests - this is critical for functionality
 	if err := h.subscribeToRequests(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to requests: %w", err)
+		log.Printf("Error: failed to subscribe to requests: %v", err)
+		startupErrors = append(startupErrors, fmt.Sprintf("requests: %v", err))
+		h.registerFailedStream("requests", "requests.historical.*.*.*")
+		criticalError = true
 	}
 
 	// Start stats reporter
 	go h.reportStats(ctx)
 
-	log.Printf("Event Hub started successfully")
+	// Start background process to retry failed streams
+	go h.retryFailedStreams()
+
+	// Log startup status
+	if len(startupErrors) > 0 {
+		if criticalError {
+			log.Printf("Event Hub started with critical errors: %v", startupErrors)
+			return fmt.Errorf("failed to start critical components: %v", strings.Join(startupErrors, ", "))
+		}
+		log.Printf("Event Hub started with some streams unavailable: %v", startupErrors)
+	} else {
+		log.Printf("Event Hub started successfully with all streams")
+	}
+
 	return nil
 }
 
@@ -478,6 +523,105 @@ func (h *EventHub) GetStats() EventStats {
 	return stats
 }
 
+// registerFailedStream adds a stream to the failed streams map for later retry
+func (h *EventHub) registerFailedStream(streamType, subject string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.failedStreams[streamType] = SubscriptionConfig{
+		Type:      streamType,
+		Subject:   subject,
+		LastRetry: time.Now(),
+	}
+}
+
+// retryFailedStreams periodically attempts to subscribe to failed streams
+func (h *EventHub) retryFailedStreams() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-ticker.C:
+			h.retryStreams()
+		}
+	}
+}
+
+// retryStreams attempts to resubscribe to all failed streams
+func (h *EventHub) retryStreams() {
+	h.mu.Lock()
+	// Make a copy of failed streams to avoid holding the lock during subscription attempts
+	failedStreams := make(map[string]SubscriptionConfig)
+	for k, v := range h.failedStreams {
+		failedStreams[k] = v
+	}
+	h.mu.Unlock()
+
+	if len(failedStreams) == 0 {
+		return
+	}
+
+	log.Printf("Attempting to reconnect to %d failed streams", len(failedStreams))
+
+	for streamType := range failedStreams {
+		var err error
+
+		switch streamType {
+		case "live":
+			err = h.subscribeToMarketLiveData(h.ctx)
+		case "daily":
+			err = h.subscribeToMarketDailyData(h.ctx)
+		case "historical":
+			err = h.subscribeToHistoricalData(h.ctx)
+		case "signals":
+			err = h.subscribeToSignals(h.ctx)
+		case "requests":
+			err = h.subscribeToRequests(h.ctx)
+		}
+
+		// If successful, remove from failed streams
+		if err == nil {
+			h.mu.Lock()
+			delete(h.failedStreams, streamType)
+			h.mu.Unlock()
+			log.Printf("Successfully reconnected to %s stream", streamType)
+		} else {
+			log.Printf("Failed to reconnect to %s stream: %v", streamType, err)
+			// Update last retry time
+			h.mu.Lock()
+			if config, exists := h.failedStreams[streamType]; exists {
+				config.LastRetry = time.Now()
+				h.failedStreams[streamType] = config
+			}
+			h.mu.Unlock()
+		}
+	}
+}
+
+// GetStreamStatus returns the current status of all streams
+func (h *EventHub) GetStreamStatus() map[string]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	status := map[string]bool{
+		"live":       true,
+		"daily":      true,
+		"historical": true,
+		"signals":    true,
+		"requests":   true,
+	}
+
+	// Mark failed streams as false
+	for streamType := range h.failedStreams {
+		status[streamType] = false
+	}
+
+	return status
+}
+
 // Close stops all subscriptions and cleans up resources
 func (h *EventHub) Close() {
 	h.mu.Lock()
@@ -485,5 +629,10 @@ func (h *EventHub) Close() {
 
 	log.Printf("Shutting down Event Hub with %d active subscriptions", len(h.subscriptions))
 
-	// Nothing to do here for now, as the client handles the NATS connections
+	// Cancel context to stop background goroutines
+	if h.cancel != nil {
+		h.cancel()
+	}
+
+	// Client handles the NATS connections
 }
