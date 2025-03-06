@@ -50,9 +50,9 @@ func (h *EventHub) Start(ctx context.Context) error {
 	}
 
 	// Subscribe to all signals
-	if err := h.subscribeToSignals(ctx); err != nil {
-		return fmt.Errorf("failed to subscribe to signals: %w", err)
-	}
+	//if err := h.subscribeToSignals(ctx); err != nil {
+	//	return fmt.Errorf("failed to subscribe to signals: %w", err)
+	//}
 
 	// Start stats reporter
 	go h.reportStats(ctx)

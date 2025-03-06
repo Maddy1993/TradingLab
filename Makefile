@@ -124,6 +124,13 @@ build-tradinglab-service:
 .PHONY: docker-images
 docker-images: docker-event-client docker-market-data-service docker-event-hub docker-api-gateway docker-tradinglab-service docker-ui
 
+# Docker images
+.PHONY: docker-go-service-images
+docker-go-service-images: docker-market-data-service docker-event-hub
+
+.PHONY: build-deploy-go-services
+build-deploy-go-services: docker-go-service-images docker-go-services-push deploy-go-services
+
 # Docker image for event client
 .PHONY: docker-event-client
 docker-event-client:
@@ -176,6 +183,11 @@ docker-push:
 	$(DOCKER) push $(REGISTRY)/$(TRADINGLAB_SERVICE):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(TRADINGLAB_UI):$(VERSION)
 
+.PHONY: docker-go-services-push
+docker-go-services-push:
+	$(DOCKER) push $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION)
+	$(DOCKER) push $(REGISTRY)/$(EVENT_HUB):$(VERSION)
+
 # Deploy to Kubernetes
 .PHONY: deploy
 deploy: deploy-nats deploy-services
@@ -196,6 +208,13 @@ deploy-services:
 	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
 	$(KUBECTL) apply -f kube/tradinglab/tradinglab-server.yaml
 	$(KUBECTL) apply -f kube/ui/ui-deployment.yaml
+
+# Deploy services
+.PHONY: deploy-go-services
+deploy-go-services:
+	@echo "Deploying services..."
+	$(KUBECTL) apply -f kube/market-data/market-data.yaml
+	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
 
 # Test
 .PHONY: test
