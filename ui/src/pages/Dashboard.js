@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import {
   Typography,
   Grid,
@@ -6,7 +6,8 @@ import {
   Box,
   Divider,
   Button,
-  Alert
+  Alert,
+  CircularProgress
 } from '@mui/material';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +16,19 @@ import SignalSummary from '../components/SignalSummary';
 import Loading from '../components/Loading';
 import RealTimeMarketData from '../components/RealTimeMarketData';
 import RealTimeSignals from '../components/RealTimeSignals';
+
+// Add global error handler for better error handling
+axios.interceptors.response.use(
+  response => response,
+  error => {
+    console.error('API Error:', error);
+    if (error.response && error.response.status === 404) {
+      // Handle not found errors
+      console.warn('Resource not found:', error.config.url);
+    }
+    return Promise.reject(error);
+  }
+);
 
 const Dashboard = () => {
   const navigate = useNavigate();

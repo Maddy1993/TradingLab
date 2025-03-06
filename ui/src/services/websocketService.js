@@ -1,8 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const BASE_URL = window.location.protocol === 'https:'
-    ? `wss://${window.location.host}/api/ws`
-    : `ws://${window.location.host}/api/ws`;
+// Fix for potential issues when running behind a load balancer or ingress
+const getBaseUrl = () => {
+  try {
+    return window.location.protocol === 'https:'
+      ? `wss://${window.location.host}/api/ws`
+      : `ws://${window.location.host}/api/ws`;
+  } catch (e) {
+    console.error('Error constructing WebSocket URL:', e);
+    // Fallback to relative URL which will use the same host
+    return '/api/ws';
+  }
+};
+
+const BASE_URL = getBaseUrl();
 
 // Hook for subscribing to market data
 export const useMarketData = (ticker) => {
@@ -187,9 +198,15 @@ export const useWebSocketConnection = () => {
 
   // Clean up on unmount
   useEffect(() => {
-    connect();
+    // Add a small delay before connecting to ensure the DOM is fully loaded
+    const initTimeout = setTimeout(() => {
+      connect();
+      console.log('WebSocket: Attempting connection to', BASE_URL);
+    }, 500);
 
     return () => {
+      clearTimeout(initTimeout);
+      
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
