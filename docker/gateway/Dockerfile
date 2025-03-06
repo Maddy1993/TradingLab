@@ -1,4 +1,4 @@
-FROM golang:1.20-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY proto/ proto/
 COPY ui/build ui/build
 
 # Build executable
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/api-gateway ./cmd/api-gateway
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/api-gateway ./cmd/gateway
 
 # Final stage
 FROM alpine:3.18

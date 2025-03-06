@@ -5,31 +5,51 @@ set -e  # Exit on error
 
 # Environment variables
 export REGISTRY="us-central1-docker.pkg.dev/financetracker-451021/tradinglab"
-export VERSION=$(git describe --tags --always --dirty || echo "dev")
+export VERSION=$(git describe --tags --always || echo "dev")
+# Remove the "dirty" suffix which causes image pull issues
 export NAMESPACE="tradinglab"
 
 # Make sure namespace exists
 kubectl get namespace $NAMESPACE > /dev/null 2>&1 || kubectl create namespace $NAMESPACE
 
-# Apply ConfigMap for event configuration
-echo "Deploying event configuration..."
-kubectl apply -f kube/nats/nats-deployment.yaml
-
-# Create credentials secret if it doesn't exist
-if ! kubectl get secret tradinglab-credentials -n $NAMESPACE > /dev/null 2>&1; then
-    echo "Creating credentials secret..."
-
-    # Create secret
-    kubectl create secret generic tradinglab-credentials \
-        --namespace $NAMESPACE \
-        --from-file=kube/market-data/alpaca_secret.yaml
-
-    echo "Secret created."
+# Create credentials secrets if they don't exist
+if ! kubectl get secret alpaca-credentials -n $NAMESPACE > /dev/null 2>&1; then
+    echo "Creating Alpaca credentials secret..."
+    kubectl apply -f kube/market-data/alpaca_secret.yaml
+    echo "Alpaca secret created."
 else
-    echo "Credentials secret already exists."
+    echo "Alpaca credentials secret already exists."
 fi
 
-# Deploy NATS server
+if ! kubectl get secret alpha-vantage-credentials -n $NAMESPACE > /dev/null 2>&1; then
+    echo "Creating Alpha Vantage credentials secret..."
+    kubectl apply -f kube/market-data/alpha_vantage_key.yaml
+    echo "Alpha Vantage secret created."
+else
+    echo "Alpha Vantage credentials secret already exists."
+fi
+
+# Create gcr-json-key secret if it doesn't exist
+if ! kubectl get secret gcr-json-key -n $NAMESPACE > /dev/null 2>&1; then
+    echo "Creating gcr-json-key secret..."
+    # Check if credentials file exists
+    if [ -f "$HOME/.config/gcloud/application_default_credentials.json" ]; then
+        kubectl create secret docker-registry gcr-json-key \
+            --namespace $NAMESPACE \
+            --docker-server=us-central1-docker.pkg.dev \
+            --docker-username=_json_key \
+            --docker-password="$(cat $HOME/.config/gcloud/application_default_credentials.json)" \
+            --docker-email=$(gcloud config get-value account)
+        echo "GCR secret created."
+    else
+        echo "WARNING: GCP credentials file not found. You need to create gcr-json-key secret manually."
+        echo "Run: gcloud auth application-default login"
+    fi
+else
+    echo "GCR secret already exists."
+fi
+
+# Deploy NATS server (only once)
 echo "Deploying NATS server..."
 envsubst < kube/nats/nats-deployment.yaml | kubectl apply -f -
 
@@ -49,7 +69,7 @@ envsubst < kube/event-hub/event-hub.yaml | kubectl apply -f -
 
 # Deploy API components
 echo "Deploying API gateway..."
-envsubst < kube/ui/api-gateway-deployment.yaml | kubectl apply -f -
+envsubst < kube/api-gateway/deployment.yaml | kubectl apply -f -
 
 echo "Deploying tradinglab service..."
 envsubst < kube/tradinglab/tradinglab-server.yaml | kubectl apply -f -
@@ -57,10 +77,16 @@ envsubst < kube/tradinglab/tradinglab-server.yaml | kubectl apply -f -
 echo "Deploying UI..."
 envsubst < kube/ui/ui-deployment.yaml | kubectl apply -f -
 
+# Deploy ingress if exists
+if [ -f kube/ingress.yaml ]; then
+    echo "Deploying ingress..."
+    envsubst < kube/ingress.yaml | kubectl apply -f -
+fi
+
 # Wait for deployments to be ready
 echo "Waiting for deployments to be ready..."
 for component in event-client market-data-service event-hub api-gateway tradinglab-service tradinglab-ui; do
-    kubectl rollout status deployment/$component -n $NAMESPACE --timeout=120s
+    kubectl rollout status deployment/$component -n $NAMESPACE --timeout=120s || echo "Warning: $component deployment not ready in time"
 done
 
 echo "Deployment completed successfully!"

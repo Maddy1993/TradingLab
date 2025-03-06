@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: tradinglab-credentials
+  name: alpha-vantage-credentials
   namespace: tradinglab
 type: Opaque
 data:

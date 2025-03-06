@@ -81,9 +81,36 @@ func main() {
 	// Set watched tickers
 	hub.SetWatchedTickers(tickers)
 
-	// Start the event hub
-	if err := hub.Start(ctx); err != nil {
-		log.Fatalf("Failed to start event hub: %v", err)
+	// Start the event hub with retry
+	var startSuccess bool
+	maxRetries := 10
+	retryDelay := 5 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		err := hub.Start(ctx)
+		if err == nil {
+			startSuccess = true
+			log.Printf("Event hub started successfully")
+			break
+		}
+
+		if strings.Contains(err.Error(), "no stream matches subject") {
+			log.Printf("Attempt %d/%d: Required streams not yet available, waiting for services to initialize: %v",
+				i+1, maxRetries, err)
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(retryDelay):
+				continue
+			}
+		} else {
+			// If it's a different error, fail immediately
+			log.Fatalf("Failed to start event hub: %v", err)
+		}
+	}
+
+	if !startSuccess {
+		log.Fatalf("Failed to start event hub after %d retries: required streams not available", maxRetries)
 	}
 
 	// Setup HTTP server for health checks and API endpoints

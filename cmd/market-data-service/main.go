@@ -158,6 +158,11 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 
 	log.Printf("Starting market data stream for %s with interval %v", tickerSymbol, interval)
 
+	// Verify data availability before starting stream
+	if !verifyDataAvailability(ctx, tickerSymbol) {
+		log.Printf("Data not available for %s. Stream will not start until data becomes available.", tickerSymbol)
+	}
+
 	t := time.NewTicker(interval)
 	defer t.Stop()
 
@@ -193,11 +198,24 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 		}
 	}()
 
+	dataAvailable := false
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// If data wasn't available before, check again
+			if !dataAvailable {
+				dataAvailable = verifyDataAvailability(ctx, tickerSymbol)
+				if !dataAvailable {
+					log.Printf("Still waiting for data availability for %s", tickerSymbol)
+					continue
+				} else {
+					log.Printf("Data now available for %s, starting regular stream", tickerSymbol)
+				}
+			}
+
 			// Check if market is open
 			isOpen, err := marketProvider.IsMarketOpen(ctx)
 			if err != nil {
@@ -217,6 +235,25 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 			}
 		}
 	}
+}
+
+// verifyDataAvailability checks if actual data (not sample data) is available for the ticker
+func verifyDataAvailability(ctx context.Context, tickerSymbol string) bool {
+	// Try to get data
+	data, err := marketProvider.GetMostRecentData(ctx, tickerSymbol)
+	if err != nil {
+		log.Printf("Failed to verify data availability for %s: %v", tickerSymbol, err)
+		return false
+	}
+
+	// Check if we got real data or sample data
+	if data.Source == "Sample" {
+		log.Printf("Only sample data available for %s, not starting stream yet", tickerSymbol)
+		return false
+	}
+
+	log.Printf("Verified data availability for %s. Source: %s", tickerSymbol, data.Source)
+	return true
 }
 
 // publishLiveData publishes real-time market data

@@ -194,26 +194,34 @@ deploy: deploy-nats deploy-services
 .PHONY: deploy-nats
 deploy-nats:
 	@echo "Deploying NATS..."
-	$(KUBECTL) apply -f kube/nats/nats-deployment.yaml
+	$(KUBECTL) apply -f kube/nats/nats-deployment.yaml -n $(NAMESPACE)
 
 # Deploy services
 .PHONY: deploy-services
 deploy-services:
 	@echo "Deploying services..."
-	$(KUBECTL) apply -f kube/event-client/event-client.yaml
-	$(KUBECTL) apply -f kube/market-data/market-data.yaml
-	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
-	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
-	$(KUBECTL) apply -f kube/tradinglab/tradinglab-server.yaml
-	$(KUBECTL) apply -f kube/ui/ui-deployment.yaml
+	$(eval export VERSION=$(shell git describe --tags --always --dirty || echo "dev"))
+	$(eval export REGISTRY=$(REGISTRY))
+	@echo "Using registry: $(REGISTRY) and version: $(VERSION)"
+	$(KUBECTL) apply -f kube/event-client/event-client.yaml -n $(NAMESPACE)
+	$(KUBECTL) apply -f kube/market-data/market-data.yaml -n $(NAMESPACE)
+	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml -n $(NAMESPACE)
+	envsubst < kube/api-gateway/deployment.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE)
+	$(KUBECTL) apply -f kube/tradinglab/tradinglab-server.yaml -n $(NAMESPACE)
+	$(KUBECTL) apply -f kube/tradinglab/tradinglab-lb-service.yaml -n $(NAMESPACE)
+	envsubst < kube/ui/ui-deployment.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE)
+	if [ -f kube/ingress.yaml ]; then envsubst < kube/ingress.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE); fi
 
 # Deploy services
 .PHONY: deploy-go-services
 deploy-go-services:
 	@echo "Deploying Go services..."
-	$(KUBECTL) apply -f kube/market-data/market-data.yaml
-	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
-	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
+	$(eval export VERSION=$(shell git describe --tags --always --dirty || echo "dev"))
+	$(eval export REGISTRY=$(REGISTRY))
+	@echo "Using registry: $(REGISTRY) and version: $(VERSION)"
+	envsubst < kube/market-data/market-data.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE)
+	envsubst < kube/event-hub/event-hub.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE)
+	envsubst < kube/api-gateway/deployment.yaml | $(KUBECTL) apply -f - -n $(NAMESPACE)
 
 # Test
 .PHONY: test

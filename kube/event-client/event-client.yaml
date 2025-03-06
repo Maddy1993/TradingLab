@@ -14,6 +14,8 @@ spec:
       labels:
         app: event-client
     spec:
+      imagePullSecrets:
+        - name: gcr-json-key
       containers:
         - name: event-client
           image: ${REGISTRY}/event-client:${VERSION}

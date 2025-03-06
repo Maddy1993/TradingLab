@@ -14,6 +14,8 @@ spec:
       labels:
         app: event-hub
     spec:
+      imagePullSecrets:
+        - name: gcr-json-key
       containers:
         - name: event-hub
           image: ${REGISTRY}/event-hub:${VERSION}

@@ -14,6 +14,8 @@ spec:
       labels:
         app: market-data-service
     spec:
+      imagePullSecrets:
+        - name: gcr-json-key
       containers:
         - name: market-data-service
           image: ${REGISTRY}/market-data-service:${VERSION}
@@ -26,13 +28,18 @@ spec:
             - name: ALPACA_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: tradinglab-credentials
+                  name: alpaca-credentials
                   key: alpaca_api_key
             - name: ALPACA_API_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: tradinglab-credentials
+                  name: alpaca-credentials
                   key: alpaca_api_secret
+            - name: ALPHA_VANTAGE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alpha-vantage-credentials
+                  key: alpha_vantage_api_key
             - name: ALPACA_LIVE_TRADING
               value: "false"
             - name: POLLING_INTERVAL
