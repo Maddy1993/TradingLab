@@ -1,61 +1,27 @@
 import os
-import grpc
-import pandas as pd
-from concurrent import futures
-from datetime import datetime
-import logging
-import json
 import sys
+import logging
+import asyncio
+import pandas as pd
+import grpc
+import json
+from datetime import datetime, timedelta
 
-# Find the proto files directory - they should be in the 'proto' directory
-# at the project root
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-proto_dir = os.path.join(project_root, 'proto')
-
-# Add the project root and proto directory to the Python path
-sys.path.insert(0, project_root)
-sys.path.insert(0, proto_dir)
-
-try:
-    # Try importing the generated proto files
-    import trading_pb2
-    import trading_pb2_grpc
-except ImportError:
-    logging.error("Could not import trading_pb2 or trading_pb2_grpc. Make sure protoc has been run.")
-    raise
-
-# Import trading system components
-from data import AlphaVantageDataProvider, CachingDataProvider
-from strategy import RedCandleStrategy
+# Import local modules
+from strategy import RedCandleStrategy, StreamingStrategyAdapter
 from analysis import OptionsRecommender, StrategyBacktester
-from core import StrategyRunner
+from events.client import EventClient
 
-# Set up logging
-logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Import generated proto files
+from proto import trading_pb2
+from proto import trading_pb2_grpc
 
 class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
     """Implementation of the TradingService gRPC server."""
 
     def __init__(self):
         """Initialize the trading service with required components."""
-        # Create data provider
-        api_key = os.getenv('ALPHA_VANTAGE_API_KEY', '')
-        self.base_provider = AlphaVantageDataProvider(interval="5min", api_key=api_key)
-
-        # Wrap with caching provider
-        cache_dir = os.getenv('CACHE_DIR', '/app/data_cache')
-        self.data_provider = CachingDataProvider(
-                data_provider=self.base_provider,
-                cache_dir=cache_dir,
-                cache_expiry_days=1
-        )
-
-        # Initialize strategy, recommender, and runner components
+        # Initialize strategy components
         self.strategies = {
             'RedCandle': RedCandleStrategy()
         }
@@ -66,28 +32,123 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 target_delta=0.45
         )
 
-        self.runner = StrategyRunner(
-                data_provider=self.data_provider,
-                strategy=self.strategies['RedCandle'],  # Default strategy
-                recommender=self.recommender,
-                visualizer=None  # No visualizer for server mode
-        )
+        # Initialize event client as None (will be initialized async)
+        self.event_client = None
+        self.adapters = {}
+        self.active_tickers = []
+        self.historical_data_cache = {}
 
-        logger.info("Trading service initialized")
+        # Default watchlist tickers
+        self.default_tickers = ['SPY', 'AAPL', 'MSFT', 'GOOGL', 'AMZN']
+
+        # Custom watchlist from environment
+        if custom_tickers := os.getenv('WATCH_TICKERS'):
+            self.default_tickers = custom_tickers.split(',')
+
+        logging.info(f"Default watchlist: {self.default_tickers}")
+
+    async def init_event_client(self):
+        """Initialize the event client asynchronously."""
+        try:
+            nats_url = os.getenv('NATS_URL', 'nats://nats:4222')
+            logging.info(f"Connecting to NATS at {nats_url}")
+
+            self.event_client = EventClient(nats_url)
+            await self.event_client.connect()
+
+            # Initialize streaming adapters for each strategy
+            for name, strategy in self.strategies.items():
+                logging.info(f"Initializing streaming adapter for {name} strategy")
+                adapter = StreamingStrategyAdapter(strategy, self.event_client)
+                # Start with default watchlist
+                await adapter.start(self.default_tickers)
+                self.adapters[name] = adapter
+
+            # Set up subscription for historical data responses
+            await self._setup_historical_data_subscription()
+
+            logging.info("Event client and strategy adapters initialized successfully")
+        except Exception as e:
+            logging.error(f"Failed to initialize event client: {e}")
+            # Retry after delay
+            await asyncio.sleep(5)
+            await self.init_event_client()
+
+    async def _setup_historical_data_subscription(self):
+        """Subscribe to historical data responses."""
+        if not self.event_client:
+            return
+
+        async def handle_historical_data(data):
+            ticker = data.get('ticker')
+            timeframe = data.get('interval')
+            days = data.get('days')
+
+            # Create cache key
+            cache_key = f"{ticker}_{timeframe}_{days}"
+
+            # Store in cache
+            self.historical_data_cache[cache_key] = data
+            logging.info(f"Received historical data for {cache_key}")
+
+        # Subscribe to historical data responses
+        await self.event_client.subscribe_market_historical('*', handle_historical_data)
+        logging.info("Subscribed to historical data responses")
+
+    async def _get_historical_data(self, ticker, days, interval='15min', timeout=10):
+        """Get historical data through the event system."""
+        if not self.event_client:
+            raise ValueError("Event client not initialized")
+
+        # Create cache key
+        cache_key = f"{ticker}_{interval}_{days}"
+
+        # Check cache first
+        if cache_key in self.historical_data_cache:
+            return self.historical_data_cache[cache_key]
+
+        # Request historical data
+        request = {
+            'ticker': ticker,
+            'days': days,
+            'interval': interval
+        }
+
+        # Publish request
+        await self.event_client.request_historical_data(ticker, days, interval)
+
+        # Wait for response with timeout
+        start_time = datetime.now()
+        while (datetime.now() - start_time).total_seconds() < timeout:
+            if cache_key in self.historical_data_cache:
+                return self.historical_data_cache[cache_key]
+            await asyncio.sleep(0.1)
+
+        raise TimeoutError(f"Timeout waiting for historical data for {cache_key}")
 
     def GetHistoricalData(self, request, context):
         """Get historical data for a ticker."""
         try:
             ticker = request.ticker
             days = request.days
-            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
+            interval = request.interval if request.interval else '15min'
 
-            logger.info(f"Getting historical data for {ticker}, {days} days, interval {interval}")
+            logging.info(f"GetHistoricalData request for {ticker}, {days} days, interval {interval}")
 
-            # Get data from provider
-            df = self.data_provider.get_historical_data(ticker, days, interval)
+            # Convert to DataFrame
+            # Note: In a fully event-driven system, we would request this through events
+            # For now, handling synchronously for compatibility
+            loop = asyncio.get_event_loop()
+            try:
+                data = loop.run_until_complete(self._get_historical_data(ticker, days, interval))
+                df = pd.DataFrame(data)
+            except (TimeoutError, ValueError) as e:
+                logging.warning(f"Failed to get data from event system: {e}")
+                logging.warning("Falling back to cached data if available")
+                # Fallback mechanism would go here
+                df = pd.DataFrame()
 
-            if df is None:
+            if df.empty:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(f"Failed to get historical data for {ticker}")
                 return trading_pb2.HistoricalDataResponse()
@@ -107,7 +168,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             return response
 
         except Exception as e:
-            logger.error(f"Error in GetHistoricalData: {str(e)}")
+            logging.error(f"Error in GetHistoricalData: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return trading_pb2.HistoricalDataResponse()
@@ -118,9 +179,9 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
-            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
+            interval = request.interval if request.interval else '15min'
 
-            logger.info(f"Generating signals for {ticker}, strategy: {strategy_name}, interval: {interval}")
+            logging.info(f"GenerateSignals request for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -129,11 +190,15 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 return trading_pb2.SignalResponse()
 
             # Get data and generate signals
-            df = self.data_provider.get_historical_data(ticker, days, interval)
-
-            if df is None:
+            # In fully event-driven system, we would subscribe to signals from the event stream
+            loop = asyncio.get_event_loop()
+            try:
+                data = loop.run_until_complete(self._get_historical_data(ticker, days, interval))
+                df = pd.DataFrame(data)
+            except (TimeoutError, ValueError) as e:
+                logging.warning(f"Failed to get data from event system: {e}")
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Failed to get historical data for {ticker}")
+                context.set_details(f"Failed to get historical data: {e}")
                 return trading_pb2.SignalResponse()
 
             # Apply strategy
@@ -152,13 +217,13 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 signal.signal_type = row['signal_type']
                 signal.entry_price = float(row['close'])
 
-                if not pd.isna(row['stoploss']):
+                if 'stoploss' in row and not pd.isna(row['stoploss']):
                     signal.stoploss = float(row['stoploss'])
 
             return response
 
         except Exception as e:
-            logger.error(f"Error in GenerateSignals: {str(e)}")
+            logging.error(f"Error in GenerateSignals: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return trading_pb2.SignalResponse()
@@ -177,7 +242,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             risk_reward_ratios = [rr for rr in request.risk_reward_ratios] if request.risk_reward_ratios else None
             profit_targets_dollar = [pd for pd in request.profit_targets_dollar] if request.profit_targets_dollar else None
 
-            logger.info(f"Running backtest for {ticker}, strategy: {strategy_name}, interval: {interval}")
+            logging.info(f"RunBacktest request for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -186,10 +251,14 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 return trading_pb2.BacktestResponse()
 
             # Get data and generate signals
-            df = self.data_provider.get_historical_data(ticker, days, interval)
-            if df is None:
+            loop = asyncio.get_event_loop()
+            try:
+                data = loop.run_until_complete(self._get_historical_data(ticker, days, interval))
+                df = pd.DataFrame(data)
+            except (TimeoutError, ValueError) as e:
+                logging.warning(f"Failed to get data from event system: {e}")
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Failed to get historical data for {ticker}")
+                context.set_details(f"Failed to get historical data: {e}")
                 return trading_pb2.BacktestResponse()
 
             # Apply strategy
@@ -213,12 +282,12 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             # Create a new response
             response = trading_pb2.BacktestResponse()
 
-            # Add results to the map properly
+            # Add results to the map
             for test_name, stats in summary.items():
                 # Access the map entry - this creates a default entry if it doesn't exist
                 result_entry = response.results[test_name]
 
-                # Now set each field individually
+                # Set each field individually
                 result_entry.win_rate = float(stats['win_rate'])
 
                 # Handle infinity for profit_factor
@@ -236,9 +305,9 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             return response
 
         except Exception as e:
-            logger.error(f"Error in RunBacktest: {str(e)}")
+            logging.error(f"Error in RunBacktest: {str(e)}")
             import traceback
-            logger.error(traceback.format_exc())  # Add stack trace for better debugging
+            logging.error(traceback.format_exc())
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return trading_pb2.BacktestResponse()
@@ -249,9 +318,9 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             ticker = request.ticker
             days = request.days
             strategy_name = request.strategy
-            interval = request.interval if request.interval else '15min'  # Default to 15min if not specified
+            interval = request.interval if request.interval else '15min'
 
-            logger.info(f"Getting options recommendations for {ticker}, strategy: {strategy_name}, interval: {interval}")
+            logging.info(f"GetOptionsRecommendations request for {ticker}, strategy: {strategy_name}, interval: {interval}")
 
             # Check if strategy exists
             if strategy_name not in self.strategies:
@@ -259,22 +328,25 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
                 context.set_details(f"Strategy {strategy_name} not found")
                 return trading_pb2.RecommendationResponse()
 
-            # Update runner with selected strategy
-            self.runner.strategy = self.strategies[strategy_name]
-
-            # Run strategy and get recommendations
-            df, recommendations = self.runner.run(
-                    ticker=ticker,
-                    days=days,
-                    visualize=False,
-                    save_recommendations=False,
-                    interval=interval
-            )
-
-            if df is None:
+            # Get data and generate signals
+            loop = asyncio.get_event_loop()
+            try:
+                data = loop.run_until_complete(self._get_historical_data(ticker, days, interval))
+                df = pd.DataFrame(data)
+            except (TimeoutError, ValueError) as e:
+                logging.warning(f"Failed to get data from event system: {e}")
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Failed to get historical data for {ticker}")
+                context.set_details(f"Failed to get historical data: {e}")
                 return trading_pb2.RecommendationResponse()
+
+            # Apply strategy
+            strategy = self.strategies[strategy_name]
+            df = strategy.generate_signals(df)
+
+            # Generate options recommendations
+            # Note: In an event-driven system, this might be provided by a dedicated service
+            # For now, we'll maintain backward compatibility
+            recommendations = self.recommender.generate_recommendations(df, None)
 
             # Convert to response format
             response = trading_pb2.RecommendationResponse()
@@ -300,41 +372,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
             return response
 
         except Exception as e:
-            logger.error(f"Error in GetOptionsRecommendations: {str(e)}")
+            logging.error(f"Error in GetOptionsRecommendations: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {str(e)}")
             return trading_pb2.RecommendationResponse()
-
-
-def serve():
-    """Start the gRPC server."""
-    # Get server port from environment or use default
-    port = os.getenv('GRPC_PORT', '50052')
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-
-    # Add the servicer to the server
-    trading_pb2_grpc.add_TradingServiceServicer_to_server(
-            TradingServiceServicer(), server
-    )
-
-    # Enable reflection for easier debugging and testing
-    # This allows tools like grpcurl to introspect the service
-    from grpc_reflection.v1alpha import reflection
-    service_names = (
-        trading_pb2.DESCRIPTOR.services_by_name['TradingService'].full_name,
-        reflection.SERVICE_NAME,
-    )
-    reflection.enable_server_reflection(service_names, server)
-
-    # Start listening
-    server.add_insecure_port(f'[::]:{port}')
-    server.start()
-
-    logger.info(f"gRPC server running on port {port} with reflection enabled")
-
-    # Keep the server running
-    server.wait_for_termination()
-
-
-if __name__ == '__main__':
-    serve()

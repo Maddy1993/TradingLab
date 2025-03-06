@@ -64,12 +64,12 @@ build: build-go build-python build-ui
 
 # Build Go services
 .PHONY: build-go
-build-go: setup-go build-event-client build-market-data-service build-event-hub
+build-go: setup-go build-event-client build-market-data-service build-event-hub build-api-gateway
 
 
 # Build Python services
 .PHONY: build-python
-build-python: build-api-gateway build-tradinglab-service
+build-python: build-tradinglab-service
 
 # Build UI
 .PHONY: build-ui
@@ -102,15 +102,12 @@ build-event-hub:
 	@mkdir -p bin
 	$(GOBUILD) -o bin/$(EVENT_HUB) ./cmd/event-hub
 
-# Build API gateway
+# Build API gateway (Go version)
 .PHONY: build-api-gateway
 build-api-gateway:
-	@echo "Building API gateway..."
-	@if [ -d "gateway" ]; then \
-		cd gateway && pip install -r requirements.txt; \
-	else \
-		echo "Gateway directory not found, skipping..."; \
-	fi
+	@echo "Building Go API gateway..."
+	@mkdir -p bin
+	$(GOBUILD) -o bin/$(API_GATEWAY_SERVICE) ./cmd/api-gateway
 
 # Build TradingLab service
 .PHONY: build-tradinglab-service
@@ -124,9 +121,9 @@ build-tradinglab-service:
 .PHONY: docker-images
 docker-images: docker-event-client docker-market-data-service docker-event-hub docker-api-gateway docker-tradinglab-service docker-ui
 
-# Docker images
+# Build Go service images
 .PHONY: docker-go-service-images
-docker-go-service-images: docker-market-data-service docker-event-hub
+docker-go-service-images: docker-market-data-service docker-event-hub docker-api-gateway
 
 .PHONY: build-deploy-go-services
 build-deploy-go-services: docker-go-service-images docker-go-services-push deploy-go-services
@@ -187,6 +184,7 @@ docker-push:
 docker-go-services-push:
 	$(DOCKER) push $(REGISTRY)/$(MARKET_DATA_SERVICE):$(VERSION)
 	$(DOCKER) push $(REGISTRY)/$(EVENT_HUB):$(VERSION)
+	$(DOCKER) push $(REGISTRY)/$(API_GATEWAY_SERVICE):$(VERSION)
 
 # Deploy to Kubernetes
 .PHONY: deploy
@@ -203,7 +201,7 @@ deploy-nats:
 deploy-services:
 	@echo "Deploying services..."
 	$(KUBECTL) apply -f kube/event-client/event-client.yaml
-	$(KUBECTL) apply -f kube/market-data/market-data-service.yaml
+	$(KUBECTL) apply -f kube/market-data/market-data.yaml
 	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
 	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
 	$(KUBECTL) apply -f kube/tradinglab/tradinglab-server.yaml
@@ -212,9 +210,10 @@ deploy-services:
 # Deploy services
 .PHONY: deploy-go-services
 deploy-go-services:
-	@echo "Deploying services..."
+	@echo "Deploying Go services..."
 	$(KUBECTL) apply -f kube/market-data/market-data.yaml
 	$(KUBECTL) apply -f kube/event-hub/event-hub.yaml
+	$(KUBECTL) apply -f kube/ui/api-gateway-deployment.yaml
 
 # Test
 .PHONY: test

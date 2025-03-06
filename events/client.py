@@ -3,7 +3,7 @@ import json
 import asyncio
 import nats
 from nats.js.api import StreamConfig
-from typing import Dict, Any, Callable, Optional, List, Union
+from typing import Dict, Any, Callable, Optional, Union, List
 
 class EventClient:
     """Client for interacting with the event messaging system."""
@@ -14,136 +14,86 @@ class EventClient:
         self.nc = None
         self.js = None
         self.subscriptions = {}
-        self.streams = {}
+        self.request_reply_callbacks = {}
 
     async def connect(self):
         """Connect to NATS server and set up JetStream."""
-        self.nc = await nats.connect(self.nats_url)
+        self.nc = await nats.connect(
+                self.nats_url,
+                reconnect_time_wait=2,
+                max_reconnect_attempts=10,
+                connect_timeout=10
+        )
         self.js = self.nc.jetstream()
 
-        # Ensure all required streams exist
-        await self._setup_streams()
+        # Ensure the streams exist
+        streams = [
+            # Market data streams
+            ("MARKET_LIVE", ["market.live.*"]),
+            ("MARKET_DAILY", ["market.daily.*"]),
+            ("MARKET_HISTORICAL", ["market.historical.*"]),
+            # Trading signals and recommendations
+            ("SIGNALS", ["signals.*"]),
+            ("RECOMMENDATIONS", ["recommendations.*"]),
+            # Request streams
+            ("REQUESTS", ["requests.*"]),
+        ]
 
-    async def _setup_streams(self):
-        """Set up all the required streams."""
-        # Market live data stream
-        try:
-            await self.js.add_stream(
-                    name="MARKET_LIVE",
-                    subjects=["market.live.*"]
-            )
-            self.streams["MARKET_LIVE"] = True
-        except nats.js.errors.BadRequestError:
-            # Stream already exists
-            self.streams["MARKET_LIVE"] = True
+        for stream_name, subjects in streams:
+            try:
+                await self.js.add_stream(name=stream_name, subjects=subjects)
+            except nats.js.errors.BadRequestError:
+                # Stream already exists
+                pass
 
-        # Market daily data stream
-        try:
-            await self.js.add_stream(
-                    name="MARKET_DAILY",
-                    subjects=["market.daily.*"]
-            )
-            self.streams["MARKET_DAILY"] = True
-        except nats.js.errors.BadRequestError:
-            # Stream already exists
-            self.streams["MARKET_DAILY"] = True
+    async def publish_market_data(self, ticker: str, data: Dict[str, Any]) -> None:
+        """Publish market data for a ticker."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
 
-        # Market historical data stream
-        try:
-            await self.js.add_stream(
-                    name="MARKET_HISTORICAL",
-                    subjects=["market.historical.data.*"]
-            )
-            self.streams["MARKET_HISTORICAL"] = True
-        except nats.js.errors.BadRequestError:
-            # Stream already exists
-            self.streams["MARKET_HISTORICAL"] = True
-
-        # Trading signals stream
-        try:
-            await self.js.add_stream(
-                    name="SIGNALS",
-                    subjects=["signals.*"]
-            )
-            self.streams["SIGNALS"] = True
-        except nats.js.errors.BadRequestError:
-            # Stream already exists
-            self.streams["SIGNALS"] = True
-
-        # Requests stream
-        try:
-            await self.js.add_stream(
-                    name="REQUESTS",
-                    subjects=["requests.*"]
-            )
-            self.streams["REQUESTS"] = True
-        except nats.js.errors.BadRequestError:
-            # Stream already exists
-            self.streams["REQUESTS"] = True
-
-    async def publish_market_live_data(self, ticker: str, data: Dict[str, Any]):
-        """Publish live market data."""
         subject = f"market.live.{ticker}"
-        # Make sure data type is set correctly
-        if isinstance(data, dict) and "data_type" not in data:
-            data["data_type"] = "live"
-
         payload = json.dumps(data).encode()
         await self.js.publish(subject, payload)
 
-    async def publish_market_daily_data(self, ticker: str, data: Dict[str, Any]):
-        """Publish daily market data."""
-        subject = f"market.daily.{ticker}"
-        # Make sure data type is set correctly
-        if isinstance(data, dict) and "data_type" not in data:
-            data["data_type"] = "daily"
-
-        payload = json.dumps(data).encode()
-        await self.js.publish(subject, payload)
-
-    async def publish_historical_data(self, ticker: str, timeframe: str, days: int, data: Dict[str, Any]):
-        """Publish historical market data."""
-        subject = f"market.historical.data.{ticker}.{timeframe}.{days}"
-
-        # Ensure metadata is present
-        if "metadata" not in data:
-            data["metadata"] = {
-                "ticker": ticker,
-                "timeframe": timeframe,
-                "days": days,
-                "data_type": "historical"
-            }
-
-        payload = json.dumps(data).encode()
-        await self.js.publish(subject, payload)
-
-    async def request_historical_data(self, ticker: str, timeframe: str, days: int,
-                                      request_data: Optional[Dict[str, Any]] = None):
-        """Request historical data for a ticker."""
-        subject = f"requests.historical.{ticker}.{timeframe}.{days}"
-
-        if request_data is None:
-            request_data = {}
-
-        # Add default metadata if not provided
-        if "timestamp" not in request_data:
-            from datetime import datetime
-            request_data["timestamp"] = datetime.now().isoformat()
-
-        if "source" not in request_data:
-            request_data["source"] = "python_client"
-
-        payload = json.dumps(request_data).encode()
-        await self.js.publish(subject, payload)
-
-    async def publish_signal(self, ticker: str, signal_data: Dict[str, Any]):
+    async def publish_signal(self, ticker: str, signal_data: Dict[str, Any]) -> None:
         """Publish a trading signal."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
         subject = f"signals.{ticker}"
         payload = json.dumps(signal_data).encode()
         await self.js.publish(subject, payload)
 
-    async def subscribe_market_live_data(self, ticker: str, callback: Callable[[Dict[str, Any]], None]):
-        """Subscribe to live market data for a ticker."""
+    async def publish_recommendation(self, ticker: str, recommendation_data: Dict[str, Any]) -> None:
+        """Publish an options recommendation."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
+        subject = f"recommendations.{ticker}"
+        payload = json.dumps(recommendation_data).encode()
+        await self.js.publish(subject, payload)
+
+    async def request_historical_data(self, ticker: str, days: int, interval: str = '15min') -> None:
+        """Request historical data for a ticker."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
+        subject = f"market.historical.request.{ticker}.{interval}.{days}"
+        request = {
+            "ticker": ticker,
+            "days": days,
+            "interval": interval,
+            "timestamp": str(datetime.now())
+        }
+        payload = json.dumps(request).encode()
+        await self.js.publish(subject, payload)
+
+    async def subscribe_market_data(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Subscribe to market data for a ticker."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
+        # Use wildcard or specific ticker
         subject = f"market.live.{ticker}"
 
         async def message_handler(msg):
@@ -154,13 +104,17 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable="market-live-consumer")
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"market-data-consumer-{ticker}")
         self.subscriptions[subject] = sub
         return sub
 
-    async def subscribe_market_daily_data(self, ticker: str, callback: Callable[[Dict[str, Any]], None]):
-        """Subscribe to daily market data for a ticker."""
-        subject = f"market.daily.{ticker}"
+    async def subscribe_market_historical(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Subscribe to historical market data responses."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
+        # Use wildcard or specific ticker
+        subject = f"market.historical.data.{ticker}"
 
         async def message_handler(msg):
             try:
@@ -170,29 +124,15 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable="market-daily-consumer")
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"historical-data-consumer-{ticker}")
         self.subscriptions[subject] = sub
         return sub
 
-    async def subscribe_historical_data(self, ticker: str, timeframe: str, days: int,
-                                        callback: Callable[[Dict[str, Any]], None]):
-        """Subscribe to historical data for a ticker."""
-        subject = f"market.historical.data.{ticker}.{timeframe}.{days}"
-
-        async def message_handler(msg):
-            try:
-                data = json.loads(msg.data.decode())
-                await callback(data)
-                await msg.ack()
-            except Exception as e:
-                print(f"Error processing message: {e}")
-
-        sub = await self.js.subscribe(subject, cb=message_handler, durable="historical-data-consumer")
-        self.subscriptions[subject] = sub
-        return sub
-
-    async def subscribe_signals(self, ticker: str, callback: Callable[[Dict[str, Any]], None]):
+    async def subscribe_signals(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to signals for a ticker."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
         subject = f"signals.{ticker}"
 
         async def message_handler(msg):
@@ -203,34 +143,30 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable="signals-consumer")
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"signals-consumer-{ticker}")
         self.subscriptions[subject] = sub
         return sub
 
-    async def subscribe_historical_requests(self, callback: Callable[[str, str, int, Dict[str, Any]], None]):
-        """Subscribe to historical data requests."""
-        subject = "requests.historical.*.*.*"
+    async def subscribe_recommendations(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Subscribe to recommendations for a ticker."""
+        if not self.js:
+            raise RuntimeError("Not connected to NATS")
+
+        subject = f"recommendations.{ticker}"
 
         async def message_handler(msg):
             try:
-                # Parse subject to extract parameters
-                parts = msg.subject.split(".")
-                if len(parts) >= 5:
-                    ticker = parts[2]
-                    timeframe = parts[3]
-                    days = int(parts[4])
-
-                    data = json.loads(msg.data.decode())
-                    await callback(ticker, timeframe, days, data)
-                    await msg.ack()
+                data = json.loads(msg.data.decode())
+                await callback(data)
+                await msg.ack()
             except Exception as e:
-                print(f"Error processing request: {e}")
+                print(f"Error processing message: {e}")
 
-        sub = await self.js.subscribe(subject, cb=message_handler, durable="historical-requests-consumer")
-        self.subscriptions["requests.historical"] = sub
+        sub = await self.js.subscribe(subject, cb=message_handler, durable=f"recommendations-consumer-{ticker}")
+        self.subscriptions[subject] = sub
         return sub
 
-    async def close(self):
+    async def close(self) -> None:
         """Close all subscriptions and connection."""
         for sub in self.subscriptions.values():
             await sub.unsubscribe()

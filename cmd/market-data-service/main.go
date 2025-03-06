@@ -161,8 +161,16 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 
-	// Also create a daily ticker that fires at 4:30 PM ET (after market close)
-	loc, _ := time.LoadLocation("America/New_York")
+	// Create daily timer that fires at 4:30 PM ET (after market close)
+	// Set safe default timezone
+	loc := time.UTC
+	etLoc, err := time.LoadLocation("America/New_York")
+	if err == nil {
+		loc = etLoc
+	} else {
+		log.Printf("Warning: Failed to load ET timezone, using UTC instead: %v", err)
+	}
+
 	now := time.Now().In(loc)
 	marketCloseTime := time.Date(now.Year(), now.Month(), now.Day(), 16, 30, 0, 0, loc)
 

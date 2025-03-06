@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: api-gateway
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: api-gateway
@@ -16,37 +16,41 @@ spec:
         - name: gcr-json-key
       containers:
         - name: api-gateway
-          image: us-central1-docker.pkg.dev/financetracker-451021/api-gateway/tradinglab-api-gateway:v1.1
+          image: ${REGISTRY}/tradinglab-api-gateway:${VERSION}
           ports:
             - containerPort: 5000
           env:
-            - name: TRADINGLAB_HOST
-              value: "tradinglab-service"
-            - name: TRADINGLAB_PORT
-              value: "50052"
-            - name: PORT
-              value: "5000"
+            - name: TRADINGLAB_SERVICE_URL
+              value: "tradinglab-service:50052"
+            - name: NATS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: nats-url
+            - name: LISTEN_ADDR
+              value: ":5000"
+            - name: LOG_LEVEL
+              value: "info"
           resources:
             requests:
               memory: "128Mi"
               cpu: "100m"
             limits:
               memory: "256Mi"
-              cpu: "200m"
+              cpu: "300m"
           readinessProbe:
             httpGet:
               path: /api/health
               port: 5000
             initialDelaySeconds: 10
-            periodSeconds: 60
+            periodSeconds: 30
             failureThreshold: 3
-
           livenessProbe:
             httpGet:
               path: /api/health
               port: 5000
             initialDelaySeconds: 15
-            periodSeconds: 90
+            periodSeconds: 60
             failureThreshold: 3
 ---
 apiVersion: v1

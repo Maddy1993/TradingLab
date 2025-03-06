@@ -2,6 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: tradinglab-ingress
+  namespace: tradinglab
   annotations:
     kubernetes.io/ingress.class: "gce"
     nginx.ingress.kubernetes.io/rewrite-target: /

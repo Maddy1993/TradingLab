@@ -16,19 +16,33 @@ spec:
         - name: gcr-json-key
       containers:
         - name: tradinglab-service
-          image: us-central1-docker.pkg.dev/financetracker-451021/docker-python-images/tradinglab:v2.2
+          image: ${REGISTRY}/tradinglab:${VERSION}
           ports:
             - containerPort: 50052
           env:
-            - name: ALPHA_VANTAGE_API_KEY
+            - name: ALPACA_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: tradinglab-credentials
-                  key: alpha_vantage_api_key
+                  key: alpaca_api_key
+            - name: ALPACA_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tradinglab-credentials
+                  key: alpaca_api_secret
+            - name: ALPACA_LIVE_TRADING
+              value: "false"
             - name: CACHE_DIR
               value: "/app/data_cache"
             - name: GRPC_PORT
               value: "50052"
+            - name: NATS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: events-config
+                  key: nats-url
+            - name: WATCH_TICKERS
+              value: "SPY,AAPL,MSFT,GOOGL,AMZN"
           resources:
             requests:
               memory: "256Mi"
@@ -39,6 +53,20 @@ spec:
           volumeMounts:
             - name: data-cache
               mountPath: /app/data_cache
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50052'); channel.close()"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50052'); channel.close()"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: data-cache
           emptyDir: {}

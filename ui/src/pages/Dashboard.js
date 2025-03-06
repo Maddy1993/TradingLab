@@ -15,6 +15,8 @@ import { useNavigate } from 'react-router-dom';
 import TradingViewChart from '../components/TradingViewChart';
 import SignalSummary from '../components/SignalSummary';
 import Loading from '../components/Loading';
+import RealTimeMarketData from '../components/RealTimeMarketData';
+import RealTimeSignals from '../components/RealTimeSignals';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -81,123 +83,6 @@ const Dashboard = () => {
     fetchEssentialData(newRange);
   };
 
-  // Render historical data section
-  const renderHistoricalSection = () => {
-    if (historicalLoading) {
-      return <Loading message={`Loading price data for ${ticker}...`} />;
-    }
-
-    if (historicalError) {
-      return (
-          <Alert severity="error">
-            {historicalError}
-          </Alert>
-      );
-    }
-
-    if (!historicalData || historicalData.length === 0) {
-      return (
-          <Alert severity="info">
-            No historical data available for {ticker}.
-          </Alert>
-      );
-    }
-
-    return (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            {ticker} Price Chart
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          <TradingViewChart
-              data={historicalData}
-              signals={signals}
-              initialRange={timeRange}
-              onRangeChange={handleRangeChange}
-          />
-        </Paper>
-    );
-  };
-
-  // Render signals section
-  const renderSignalsSection = () => {
-    if (signalsLoading) {
-      return <Loading message={`Loading signals for ${ticker}...`} />;
-    }
-
-    if (signalsError) {
-      return (
-          <Alert severity="error">
-            {signalsError}
-          </Alert>
-      );
-    }
-
-    return <SignalSummary signals={signals} loading={false} />;
-  };
-
-  // Render a simplified placeholder for backtest section
-  const renderBacktestSection = () => {
-    return (
-        <Paper sx={{ p: 2, height: '100%' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">Backtest Results</Typography>
-            <Button
-                variant="outlined"
-                size="small"
-                onClick={() => navigate('/backtest')}
-            >
-              Run Backtests
-            </Button>
-          </Box>
-          <Divider sx={{ mb: 2 }} />
-          <Box sx={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            height: '200px',
-            backgroundColor: 'rgba(0,0,0,0.05)',
-            borderRadius: 1
-          }}>
-            <Typography variant="body1" color="text.secondary">
-              Click "Run Backtests" to analyze {ticker} performance
-            </Typography>
-          </Box>
-        </Paper>
-    );
-  };
-
-  // Render a simplified placeholder for recommendations section
-  const renderRecommendationsSection = () => {
-    return (
-        <Paper sx={{ p: 2, height: '100%' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">Options Recommendations</Typography>
-            <Button
-                variant="outlined"
-                size="small"
-                onClick={() => navigate('/recommendations')}
-            >
-              Get Recommendations
-            </Button>
-          </Box>
-          <Divider sx={{ mb: 2 }} />
-          <Box sx={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            height: '200px',
-            backgroundColor: 'rgba(0,0,0,0.05)',
-            borderRadius: 1
-          }}>
-            <Typography variant="body1" color="text.secondary">
-              Click "Get Recommendations" to see options strategies for {ticker}
-            </Typography>
-          </Box>
-        </Paper>
-    );
-  };
-
   return (
       <Box>
         <Typography variant="h4" gutterBottom>
@@ -205,28 +90,111 @@ const Dashboard = () => {
         </Typography>
 
         <Typography variant="body1" color="text.secondary" paragraph>
-          Real-time trading analysis and recommendations for {ticker} using the Red Candle strategy.
+          Real-time trading analysis and recommendations using the Red Candle strategy.
         </Typography>
 
         <Grid container spacing={3}>
+          {/* Real-Time Market Data */}
+          <Grid item xs={12}>
+            <RealTimeMarketData ticker={ticker} />
+          </Grid>
+
+          {/* Real-Time Signals */}
+          <Grid item xs={12}>
+            <RealTimeSignals ticker={ticker} />
+          </Grid>
+
           {/* Price Chart */}
           <Grid item xs={12}>
-            {renderHistoricalSection()}
+            {historicalLoading ? (
+                <Loading message={`Loading price data for ${ticker}...`} />
+            ) : historicalError ? (
+                <Alert severity="error">{historicalError}</Alert>
+            ) : !historicalData || historicalData.length === 0 ? (
+                <Alert severity="info">No historical data available for {ticker}.</Alert>
+            ) : (
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="h6" gutterBottom>
+                    {ticker} Historical Price Chart
+                  </Typography>
+                  <Divider sx={{ mb: 2 }} />
+                  <TradingViewChart
+                      data={historicalData}
+                      signals={signals}
+                      initialRange={timeRange}
+                      onRangeChange={handleRangeChange}
+                  />
+                </Paper>
+            )}
           </Grid>
 
           {/* Signal Summary */}
           <Grid item xs={12}>
-            {renderSignalsSection()}
+            {signalsLoading ? (
+                <Loading message={`Loading signals for ${ticker}...`} />
+            ) : signalsError ? (
+                <Alert severity="error">{signalsError}</Alert>
+            ) : (
+                <SignalSummary signals={signals} loading={false} />
+            )}
           </Grid>
 
           {/* Backtest Preview */}
           <Grid item xs={12} md={6}>
-            {renderBacktestSection()}
+            <Paper sx={{ p: 2, height: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Backtest Results</Typography>
+                <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => navigate('/backtest')}
+                >
+                  Run Backtests
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '200px',
+                backgroundColor: 'rgba(0,0,0,0.05)',
+                borderRadius: 1
+              }}>
+                <Typography variant="body1" color="text.secondary">
+                  Click "Run Backtests" to analyze {ticker} performance
+                </Typography>
+              </Box>
+            </Paper>
           </Grid>
 
           {/* Recommendation Preview */}
           <Grid item xs={12} md={6}>
-            {renderRecommendationsSection()}
+            <Paper sx={{ p: 2, height: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Options Recommendations</Typography>
+                <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => navigate('/recommendations')}
+                >
+                  Get Recommendations
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '200px',
+                backgroundColor: 'rgba(0,0,0,0.05)',
+                borderRadius: 1
+              }}>
+                <Typography variant="body1" color="text.secondary">
+                  Click "Get Recommendations" to see options strategies for {ticker}
+                </Typography>
+              </Box>
+            </Paper>
           </Grid>
         </Grid>
       </Box>

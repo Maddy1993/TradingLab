@@ -18,6 +18,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install NATS client for event streaming
+RUN pip install nats-py==2.4.0 asyncio-nats-streaming>=0.4.0
+
 # Copy protobuf definition files
 COPY proto/ /app/proto/
 
@@ -37,6 +40,7 @@ COPY strategy/ /app/strategy/
 COPY analysis/ /app/analysis/
 COPY core/ /app/core/
 COPY server/ /app/server/
+COPY events/ /app/events/
 COPY __init__.py /app/
 
 # Create cache directory
