@@ -18,18 +18,18 @@ type AlphaVantageProvider struct {
 }
 
 // MarketData represents OHLCV market data
-type MarketData struct {
-	Ticker    string    `json:"ticker"`
-	Timestamp time.Time `json:"timestamp"`
-	Price     float64   `json:"price"`
-	Open      float64   `json:"open"`
-	High      float64   `json:"high"`
-	Low       float64   `json:"low"`
-	Close     float64   `json:"close"`
-	Volume    int64     `json:"volume"`
-	Interval  string    `json:"interval"`
-	Source    string    `json:"source"`
-}
+//type MarketData struct {
+//	Ticker    string    `json:"ticker"`
+//	Timestamp time.Time `json:"timestamp"`
+//	Price     float64   `json:"price"`
+//	Open      float64   `json:"open"`
+//	High      float64   `json:"high"`
+//	Low       float64   `json:"low"`
+//	Close     float64   `json:"close"`
+//	Volume    int64     `json:"volume"`
+//	Interval  string    `json:"interval"`
+//	Source    string    `json:"source"`
+//}
 
 // NewAlphaVantageProvider creates a new Alpha Vantage data provider
 func NewAlphaVantageProvider(apiKey string) (*AlphaVantageProvider, error) {

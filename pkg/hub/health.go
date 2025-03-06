@@ -1,4 +1,3 @@
-// pkg/hub/health.go
 package hub
 
 import (

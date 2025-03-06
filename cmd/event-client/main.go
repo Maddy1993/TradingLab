@@ -55,13 +55,22 @@ func main() {
 
 	// Subscribe to market data for example ticker
 	ticker := "SPY"
-	sub, err := client.SubscribeMarketData(ticker, func(data []byte) {
-		log.Printf("Received data for %s: %s", ticker, string(data))
+	sub, err := client.SubscribeMarketLiveData(ticker, func(data []byte) {
+		log.Printf("Received live data for %s: %s", ticker, string(data))
 	})
 	if err != nil {
-		log.Fatalf("Failed to subscribe to market data: %v", err)
+		log.Fatalf("Failed to subscribe to market live data: %v", err)
 	}
 	defer sub.Unsubscribe()
+
+	// Also subscribe to daily data
+	dailySub, err := client.SubscribeMarketDailyData(ticker, func(data []byte) {
+		log.Printf("Received daily data for %s: %s", ticker, string(data))
+	})
+	if err != nil {
+		log.Fatalf("Failed to subscribe to market daily data: %v", err)
+	}
+	defer dailySub.Unsubscribe()
 
 	// Publish example data periodically
 	go func() {
@@ -73,7 +82,8 @@ func main() {
 			case <-ctx.Done():
 				return
 			case t := <-ticker.C:
-				exampleData := map[string]interface{}{
+				// Create example live market data
+				liveData := map[string]interface{}{
 					"ticker":    "SPY",
 					"timestamp": t.Format(time.RFC3339),
 					"price":     420.69,
@@ -82,12 +92,34 @@ func main() {
 					"low":       418.75,
 					"close":     420.69,
 					"volume":    1234567,
+					"data_type": "live",
 				}
 
-				if err := client.PublishMarketData(ctx, "SPY", exampleData); err != nil {
-					log.Printf("Failed to publish market data: %v", err)
+				if err := client.PublishMarketLiveData(ctx, "SPY", liveData); err != nil {
+					log.Printf("Failed to publish market live data: %v", err)
 				} else {
-					log.Printf("Published market data for SPY")
+					log.Printf("Published market live data for SPY")
+				}
+
+				// Every 30 seconds, publish daily data as well
+				if t.Second()%30 == 0 {
+					dailyData := map[string]interface{}{
+						"ticker":    "SPY",
+						"timestamp": t.Format(time.RFC3339),
+						"price":     421.42,
+						"open":      418.75,
+						"high":      422.50,
+						"low":       417.25,
+						"close":     421.42,
+						"volume":    15678901,
+						"data_type": "daily",
+					}
+
+					if err := client.PublishMarketDailyData(ctx, "SPY", dailyData); err != nil {
+						log.Printf("Failed to publish market daily data: %v", err)
+					} else {
+						log.Printf("Published market daily data for SPY")
+					}
 				}
 			}
 		}

@@ -17,10 +17,27 @@ type AlpacaProvider struct {
 	apiKey        string
 	apiSecret     string
 	baseURL       string
+	dataBaseURL   string // Separate URL for market data API
 	httpClient    *http.Client
 	paperTrading  bool
 	lastValidData map[string]*MarketData // Cache last valid data by ticker
-	useFallback   bool                   // Flag to control fallback data generation
+}
+
+// MarketData represents OHLCV market data
+type MarketData struct {
+	Ticker     string    `json:"ticker"`
+	Timestamp  time.Time `json:"timestamp"`
+	Price      float64   `json:"price"`
+	Open       float64   `json:"open"`
+	High       float64   `json:"high"`
+	Low        float64   `json:"low"`
+	Close      float64   `json:"close"`
+	Volume     int64     `json:"volume"`
+	VWAP       float64   `json:"vwap,omitempty"`
+	TradeCount int       `json:"trade_count,omitempty"`
+	Interval   string    `json:"interval"`
+	Source     string    `json:"source"`
+	DataType   string    `json:"data_type,omitempty"` // "live", "daily", "historical", "recent"
 }
 
 // AlpacaBar represents OHLCV bar data from Alpaca
@@ -42,6 +59,8 @@ func NewAlpacaProvider(apiKey, apiSecret string, paperTrading bool) (*AlpacaProv
 	}
 
 	baseURL := "https://api.alpaca.markets"
+	dataBaseURL := "https://data.alpaca.markets"
+
 	if paperTrading {
 		baseURL = "https://paper-api.alpaca.markets"
 	}
@@ -50,17 +69,17 @@ func NewAlpacaProvider(apiKey, apiSecret string, paperTrading bool) (*AlpacaProv
 		apiKey:        apiKey,
 		apiSecret:     apiSecret,
 		baseURL:       baseURL,
+		dataBaseURL:   dataBaseURL,
 		paperTrading:  paperTrading,
 		lastValidData: make(map[string]*MarketData),
-		useFallback:   true,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}, nil
 }
 
-// isMarketOpen checks if the market is currently open
-func (p *AlpacaProvider) isMarketOpen(ctx context.Context) (bool, error) {
+// IsMarketOpen checks if the market is currently open
+func (p *AlpacaProvider) IsMarketOpen(ctx context.Context) (bool, error) {
 	// Build URL for market clock endpoint
 	requestURL := fmt.Sprintf("%s/v2/clock", p.baseURL)
 
@@ -99,44 +118,21 @@ func (p *AlpacaProvider) isMarketOpen(ctx context.Context) (bool, error) {
 	return result.IsOpen, nil
 }
 
-// GetLatestData fetches the latest market data for the specified ticker
+// GetLatestData fetches real-time market data for a ticker
 func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*MarketData, error) {
 	// Check if market is open
-	isOpen, err := p.isMarketOpen(ctx)
+	isOpen, err := p.IsMarketOpen(ctx)
 	if err != nil {
 		log.Printf("Failed to check market status: %v", err)
 		// Proceed with the attempt even if we can't check market status
 	}
 
 	if !isOpen {
-		log.Printf("Market is closed, using fallback data for %s", ticker)
-		// Try to get the most recent bars first
-		data, err := p.getRecentBar(ctx, ticker)
-		if err == nil {
-			// Cache this data
-			p.lastValidData[ticker] = data
-			return data, nil
-		}
-
-		log.Printf("Fallback to recent bars failed: %v", err)
-
-		// Check if we have cached data
-		if cachedData, ok := p.lastValidData[ticker]; ok {
-			// Update timestamp to current time
-			cachedData.Timestamp = time.Now()
-			return cachedData, nil
-		}
-
-		// Last resort: generate sample data if allowed
-		if p.useFallback {
-			return p.generateSampleData(ticker), nil
-		}
-
-		return nil, fmt.Errorf("market is closed and no fallback data available for %s", ticker)
+		log.Printf("Market is closed, using most recent data for %s", ticker)
+		return p.GetMostRecentData(ctx, ticker)
 	}
 
-	// Market is open, try to get live data
-	// Build URL for quotes endpoint
+	// Market is open, try to get live quotes
 	requestURL := fmt.Sprintf("%s/v2/stocks/%s/quotes/latest", p.baseURL, url.PathEscape(ticker))
 
 	// Create request
@@ -160,15 +156,9 @@ func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*Mar
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		// Try fallback to recent bars
-		data, barErr := p.getRecentBar(ctx, ticker)
-		if barErr == nil {
-			// Cache this data
-			p.lastValidData[ticker] = data
-			return data, nil
-		}
-
-		// If fallbacks failed, return original error
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		log.Printf("Failed to get quotes for %s (status %d), falling back to bars",
+			ticker, resp.StatusCode)
+		return p.GetMostRecentData(ctx, ticker)
 	}
 
 	// Parse response
@@ -186,25 +176,51 @@ func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*Mar
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Get the latest bar to get OHLC data
-	bar, err := p.getRecentBar(ctx, ticker)
+	// Get the latest 1-minute bar to complete OHLC data
+	bar, err := p.getLatestMinuteBar(ctx, ticker)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get latest bar: %w", err)
+		log.Printf("Failed to get latest minute bar: %v", err)
+		// If we can't get the bar, use the quote data to create a partial record
+		midPrice := (result.Quote.BidPrice + result.Quote.AskPrice) / 2
+		timestamp := time.Unix(0, result.Quote.Timestamp)
+
+		data := &MarketData{
+			Ticker:    ticker,
+			Timestamp: timestamp,
+			Price:     midPrice,
+			Open:      midPrice, // Use mid price as a fallback
+			High:      midPrice,
+			Low:       midPrice,
+			Close:     midPrice,
+			Volume:    0, // Unknown
+			Interval:  "1min",
+			Source:    "Alpaca Quotes",
+			DataType:  "live",
+		}
+
+		// Cache the data
+		p.lastValidData[ticker] = data
+		return data, nil
 	}
 
-	// Create market data
+	// Create market data that combines quote and bar
 	timestamp := time.Unix(0, result.Quote.Timestamp)
+	midPrice := (result.Quote.BidPrice + result.Quote.AskPrice) / 2
+
 	data := &MarketData{
-		Ticker:    ticker,
-		Timestamp: timestamp,
-		Price:     (result.Quote.BidPrice + result.Quote.AskPrice) / 2, // Mid price
-		Open:      bar.Open,
-		High:      bar.High,
-		Low:       bar.Low,
-		Close:     bar.Close,
-		Volume:    bar.Volume,
-		Interval:  "minute",
-		Source:    "Alpaca",
+		Ticker:     ticker,
+		Timestamp:  timestamp,
+		Price:      midPrice,
+		Open:       bar.Open,
+		High:       bar.High,
+		Low:        bar.Low,
+		Close:      bar.Close,
+		Volume:     bar.Volume,
+		VWAP:       bar.VWAP,
+		TradeCount: bar.TradeCount,
+		Interval:   "1min",
+		Source:     "Alpaca",
+		DataType:   "live",
 	}
 
 	// Cache the valid data
@@ -213,18 +229,114 @@ func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*Mar
 	return data, nil
 }
 
-// getRecentBar fetches a recent bar for the ticker
-func (p *AlpacaProvider) getRecentBar(ctx context.Context, ticker string) (*MarketData, error) {
-	// Get current time
-	now := time.Now().UTC()
+// GetMostRecentData fetches the most recent available data for a ticker
+func (p *AlpacaProvider) GetMostRecentData(ctx context.Context, ticker string) (*MarketData, error) {
+	// Try to get the most recent 1-minute bar
+	bar, err := p.getLatestMinuteBar(ctx, ticker)
+	if err == nil {
+		data := &MarketData{
+			Ticker:     ticker,
+			Timestamp:  time.Unix(0, bar.Timestamp),
+			Price:      bar.Close,
+			Open:       bar.Open,
+			High:       bar.High,
+			Low:        bar.Low,
+			Close:      bar.Close,
+			Volume:     bar.Volume,
+			VWAP:       bar.VWAP,
+			TradeCount: bar.TradeCount,
+			Interval:   "1min",
+			Source:     "Alpaca",
+			DataType:   "recent",
+		}
 
-	// Set end time to now and start time to 5 days ago to ensure we catch the most recent trading day
+		p.lastValidData[ticker] = data
+		return data, nil
+	}
+
+	// If that fails, try to get the latest daily bar
+	log.Printf("Failed to get latest minute bar for %s: %v, trying daily bar", ticker, err)
+
+	// Get the most recent daily bar
+	dailyBar, err := p.getLatestDailyBar(ctx, ticker)
+	if err == nil {
+		data := &MarketData{
+			Ticker:     ticker,
+			Timestamp:  time.Unix(0, dailyBar.Timestamp),
+			Price:      dailyBar.Close,
+			Open:       dailyBar.Open,
+			High:       dailyBar.High,
+			Low:        dailyBar.Low,
+			Close:      dailyBar.Close,
+			Volume:     dailyBar.Volume,
+			VWAP:       dailyBar.VWAP,
+			TradeCount: dailyBar.TradeCount,
+			Interval:   "1day",
+			Source:     "Alpaca",
+			DataType:   "recent",
+		}
+
+		p.lastValidData[ticker] = data
+		return data, nil
+	}
+
+	// If all else fails, check if we have cached data
+	if cachedData, ok := p.lastValidData[ticker]; ok {
+		log.Printf("Using cached data for %s", ticker)
+		// Return a copy with updated timestamp
+		dataCopy := *cachedData
+		dataCopy.Timestamp = time.Now()
+		dataCopy.DataType = "cached"
+		return &dataCopy, nil
+	}
+
+	// Last resort: generate sample data
+	log.Printf("No data available for %s, generating sample data", ticker)
+	return p.generateSampleData(ticker), nil
+}
+
+// GetDailyData fetches end-of-day data for a ticker
+func (p *AlpacaProvider) GetDailyData(ctx context.Context, ticker string) (*MarketData, error) {
+	dailyBar, err := p.getLatestDailyBar(ctx, ticker)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get daily bar: %w", err)
+	}
+
+	data := &MarketData{
+		Ticker:     ticker,
+		Timestamp:  time.Unix(0, dailyBar.Timestamp),
+		Price:      dailyBar.Close,
+		Open:       dailyBar.Open,
+		High:       dailyBar.High,
+		Low:        dailyBar.Low,
+		Close:      dailyBar.Close,
+		Volume:     dailyBar.Volume,
+		VWAP:       dailyBar.VWAP,
+		TradeCount: dailyBar.TradeCount,
+		Interval:   "1day",
+		Source:     "Alpaca",
+		DataType:   "daily",
+	}
+
+	return data, nil
+}
+
+// GetHistoricalData fetches historical data for a ticker with specified parameters
+func (p *AlpacaProvider) GetHistoricalData(ctx context.Context, ticker string, days int, timeframe string) ([]*MarketData, error) {
+	// Convert timeframe to Alpaca format
+	alpacaTimeframe, err := convertToAlpacaTimeframe(timeframe)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate time range
+	now := time.Now()
 	end := now.Format(time.RFC3339)
-	start := now.AddDate(0, 0, -3).Format(time.RFC3339)
+	start := now.AddDate(0, 0, -days).Format(time.RFC3339)
 
 	// Build URL for bars endpoint
-	requestURL := fmt.Sprintf("%s/v2/stocks/%s/bars?start=%s&end=%s&limit=1&timeframe=1Day",
-		p.baseURL, url.PathEscape(ticker), url.QueryEscape(start), url.QueryEscape(end))
+	requestURL := fmt.Sprintf("%s/v2/stocks/%s/bars?start=%s&end=%s&timeframe=%s&limit=10000",
+		p.dataBaseURL, url.PathEscape(ticker), url.QueryEscape(start), url.QueryEscape(end), alpacaTimeframe)
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
@@ -235,7 +347,79 @@ func (p *AlpacaProvider) getRecentBar(ctx context.Context, ticker string) (*Mark
 	// Add authentication headers
 	req.Header.Add("APCA-API-KEY-ID", p.apiKey)
 	req.Header.Add("APCA-API-SECRET-KEY", p.apiSecret)
-	req.Header.Add("Accept", "application/json")
+
+	// Execute request
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var result struct {
+		Bars []AlpacaBar `json:"bars"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Convert to MarketData array
+	data := make([]*MarketData, 0, len(result.Bars))
+	for _, bar := range result.Bars {
+		marketData := &MarketData{
+			Ticker:     ticker,
+			Timestamp:  time.Unix(0, bar.Timestamp),
+			Price:      bar.Close,
+			Open:       bar.Open,
+			High:       bar.High,
+			Low:        bar.Low,
+			Close:      bar.Close,
+			Volume:     bar.Volume,
+			VWAP:       bar.VWAP,
+			TradeCount: bar.TradeCount,
+			Interval:   timeframe,
+			Source:     "Alpaca",
+			DataType:   "historical",
+		}
+
+		data = append(data, marketData)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no historical data found for %s", ticker)
+	}
+
+	return data, nil
+}
+
+// getLatestMinuteBar fetches the most recent 1-minute bar for a ticker
+func (p *AlpacaProvider) getLatestMinuteBar(ctx context.Context, ticker string) (*AlpacaBar, error) {
+	// Get current time
+	now := time.Now().UTC()
+
+	// Set time range - last 15 minutes to now
+	end := now.Format(time.RFC3339)
+	start := now.Add(-15 * time.Minute).Format(time.RFC3339)
+
+	// Build URL for bars endpoint
+	requestURL := fmt.Sprintf("%s/v2/stocks/%s/bars?start=%s&end=%s&timeframe=1Min&limit=1",
+		p.dataBaseURL, url.PathEscape(ticker), url.QueryEscape(start), url.QueryEscape(end))
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication headers
+	req.Header.Add("APCA-API-KEY-ID", p.apiKey)
+	req.Header.Add("APCA-API-SECRET-KEY", p.apiSecret)
 
 	// Execute request
 	resp, err := p.httpClient.Do(req)
@@ -259,26 +443,61 @@ func (p *AlpacaProvider) getRecentBar(ctx context.Context, ticker string) (*Mark
 	}
 
 	if len(result.Bars) == 0 {
-		return nil, fmt.Errorf("no bars returned for ticker %s", ticker)
+		return nil, fmt.Errorf("no recent minute bars found for %s", ticker)
 	}
 
-	bar := result.Bars[0]
-	timestamp := time.Unix(bar.Timestamp/1000000000, bar.Timestamp%1000000000)
+	return &result.Bars[len(result.Bars)-1], nil
+}
 
-	data := &MarketData{
-		Ticker:    ticker,
-		Timestamp: timestamp,
-		Price:     bar.Close,
-		Open:      bar.Open,
-		High:      bar.High,
-		Low:       bar.Low,
-		Close:     bar.Close,
-		Volume:    bar.Volume,
-		Interval:  "day",
-		Source:    "Alpaca",
+// getLatestDailyBar fetches the most recent daily bar for a ticker
+func (p *AlpacaProvider) getLatestDailyBar(ctx context.Context, ticker string) (*AlpacaBar, error) {
+	// Get current time
+	now := time.Now().UTC()
+
+	// Set time range - last 3 days to now
+	end := now.Format(time.RFC3339)
+	start := now.AddDate(0, 0, -3).Format(time.RFC3339)
+
+	// Build URL for bars endpoint
+	requestURL := fmt.Sprintf("%s/v2/stocks/%s/bars?start=%s&end=%s&timeframe=1Day&limit=1",
+		p.dataBaseURL, url.PathEscape(ticker), url.QueryEscape(start), url.QueryEscape(end))
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return data, nil
+	// Add authentication headers
+	req.Header.Add("APCA-API-KEY-ID", p.apiKey)
+	req.Header.Add("APCA-API-SECRET-KEY", p.apiSecret)
+
+	// Execute request
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var result struct {
+		Bars []AlpacaBar `json:"bars"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(result.Bars) == 0 {
+		return nil, fmt.Errorf("no recent daily bars found for %s", ticker)
+	}
+
+	return &result.Bars[len(result.Bars)-1], nil
 }
 
 // generateSampleData creates dummy market data for testing when market is closed
@@ -312,82 +531,10 @@ func (p *AlpacaProvider) generateSampleData(ticker string) *MarketData {
 		Low:       basePrice * 0.98,
 		Close:     basePrice,
 		Volume:    500000 + (now.Unix() % 1000000), // Some pseudo-random volume
-		Interval:  "minute",
+		Interval:  "1min",
 		Source:    "Alpaca (Simulated)",
+		DataType:  "generated",
 	}
-}
-
-// GetHistoricalData fetches historical market data for the specified ticker
-func (p *AlpacaProvider) GetHistoricalData(ctx context.Context, ticker string, days int, interval string) ([]*MarketData, error) {
-	// Convert interval to Alpaca timeframe format
-	timeframe, err := convertToAlpacaTimeframe(interval)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get current time
-	now := time.Now().UTC()
-
-	// Set end time to now and start time to days ago
-	end := now.Format(time.RFC3339)
-	start := now.AddDate(0, 0, -days).Format(time.RFC3339)
-
-	// Build URL for bars endpoint
-	requestURL := fmt.Sprintf("%s/v2/stocks/%s/bars?start=%s&end=%s&timeframe=%s",
-		p.baseURL, url.PathEscape(ticker), url.QueryEscape(start), url.QueryEscape(end), timeframe)
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add authentication headers
-	req.Header.Add("APCA-API-KEY-ID", p.apiKey)
-	req.Header.Add("APCA-API-SECRET-KEY", p.apiSecret)
-	req.Header.Add("Accept", "application/json")
-
-	// Execute request
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Parse response
-	var result struct {
-		Bars []AlpacaBar `json:"bars"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Convert to MarketData slice
-	marketData := make([]*MarketData, 0, len(result.Bars))
-	for _, bar := range result.Bars {
-		timestamp := time.Unix(bar.Timestamp/1000000000, bar.Timestamp%1000000000)
-		data := &MarketData{
-			Ticker:    ticker,
-			Timestamp: timestamp,
-			Price:     bar.Close,
-			Open:      bar.Open,
-			High:      bar.High,
-			Low:       bar.Low,
-			Close:     bar.Close,
-			Volume:    bar.Volume,
-			Interval:  interval,
-			Source:    "Alpaca",
-		}
-		marketData = append(marketData, data)
-	}
-
-	return marketData, nil
 }
 
 // convertToAlpacaTimeframe converts common interval notation to Alpaca timeframe format
