@@ -206,6 +206,11 @@ func (c *EventClient) SubscribeSignals(ticker string, handler func([]byte)) (*na
 	}, nats.DeliverAll())
 }
 
+// GetNATS returns the underlying NATS connection
+func (c *EventClient) GetNATS() *nats.Conn {
+	return c.conn
+}
+
 // Close closes the connection to NATS
 func (c *EventClient) Close() {
 	if c.conn != nil {

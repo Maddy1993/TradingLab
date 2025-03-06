@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import CallMadeIcon from '@mui/icons-material/CallMade';
 import CallReceivedIcon from '@mui/icons-material/CallReceived';
-import { format, parse } from 'date-fns';
+import { format } from 'date-fns';
 
 const RecommendationCard = ({ recommendation }) => {
   const {

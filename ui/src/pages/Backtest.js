@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography,
   Box,
@@ -20,7 +20,6 @@ import {
   TableBody,
   TableCell,
   TableContainer,
-  TableHead,
   TableRow
 } from '@mui/material';
 import axios from 'axios';
@@ -53,24 +52,7 @@ const Backtest = () => {
   const [selectedResult, setSelectedResult] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // Listen for ticker changes
-  useEffect(() => {
-    const handleTickerChange = (event) => {
-      setTicker(event.detail);
-    };
-
-    window.addEventListener('tickerchange', handleTickerChange);
-    return () => {
-      window.removeEventListener('tickerchange', handleTickerChange);
-    };
-  }, []);
-
-  // Fetch data when component mounts
-  useEffect(() => {
-    runBacktest();
-  }, [ticker]);
-
-  const runBacktest = async () => {
+  const runBacktest = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -93,7 +75,7 @@ const Backtest = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ticker, days, strategy, profitTargets, riskRewardRatios, profitTargetsDollar]);
 
   const handleShowDetails = (key, result) => {
     setSelectedResult({
@@ -120,8 +102,25 @@ const Backtest = () => {
     losing: result.losing_trades
   }));
 
-  // Colors for charts
-  const COLORS = ['#4caf50', '#f44336', '#2196f3', '#ff9800', '#9c27b0', '#00bcd4'];
+  // Listen for ticker changes
+  useEffect(() => {
+    const handleTickerChange = (event) => {
+      setTicker(event.detail);
+    };
+
+    window.addEventListener('tickerchange', handleTickerChange);
+    return () => {
+      window.removeEventListener('tickerchange', handleTickerChange);
+    };
+  }, []);
+
+  // Fetch data when component mounts
+  useEffect(() => {
+    runBacktest();
+  }, [ticker, runBacktest]);
+
+  // Define pie chart colors
+  const pieChartColors = ['#4caf50', '#f44336'];
 
   // Pie chart data for selected result
   const selectedResultPieData = selectedResult ? [
@@ -373,7 +372,7 @@ const Backtest = () => {
                               label={(entry) => `${entry.name}: ${entry.value}`}
                           >
                             {selectedResultPieData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={index === 0 ? '#4caf50' : '#f44336'} />
+                                <Cell key={`cell-${index}`} fill={pieChartColors[index]} />
                             ))}
                           </Pie>
                           <Tooltip formatter={(value) => [value, 'Trades']} />

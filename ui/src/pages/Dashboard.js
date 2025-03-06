@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography,
   Grid,
   Paper,
   Box,
-  Card,
-  CardContent,
   Divider,
   Button,
   Alert
@@ -47,9 +45,9 @@ const Dashboard = () => {
   // Fetch essential data (historical data and signals) for dashboard
   useEffect(() => {
     fetchEssentialData(timeRange);
-  }, [ticker]);
+  }, [ticker, timeRange, fetchEssentialData]);
 
-  const fetchEssentialData = async (range = timeRange) => {
+  const fetchEssentialData = useCallback(async (range = timeRange) => {
     setHistoricalLoading(true);
     setSignalsLoading(true);
     setHistoricalError(null);
@@ -76,7 +74,7 @@ const Dashboard = () => {
     } finally {
       setSignalsLoading(false);
     }
-  };
+  }, [ticker, timeRange]);
 
   const handleRangeChange = (newRange) => {
     setTimeRange(newRange);

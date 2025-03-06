@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography,
   Box,
@@ -59,9 +59,9 @@ const Signals = () => {
   // Fetch data when ticker or days change
   useEffect(() => {
     fetchData(timeRange);
-  }, [ticker]);
+  }, [ticker, timeRange, fetchData]);
 
-  const fetchData = async (range = timeRange) => {
+  const fetchData = useCallback(async (range = timeRange) => {
     setLoading(true);
     setError(null);
 
@@ -80,7 +80,7 @@ const Signals = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ticker, days, timeRange, strategy]);
 
   const handleDaysChange = (event) => {
     setDays(event.target.value);

@@ -60,7 +60,7 @@ setup-python:
 
 # Build all services
 .PHONY: build
-build: build-go build-python build-ui
+build: build-go build-ui
 
 # Build Go services
 .PHONY: build-go
@@ -107,7 +107,7 @@ build-event-hub:
 build-api-gateway:
 	@echo "Building Go API gateway..."
 	@mkdir -p bin
-	$(GOBUILD) -o bin/$(API_GATEWAY_SERVICE) ./cmd/api-gateway
+	$(GOBUILD) -o bin/$(API_GATEWAY_SERVICE) ./cmd/gateway
 
 # Build TradingLab service
 .PHONY: build-tradinglab-service

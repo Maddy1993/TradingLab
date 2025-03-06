@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography,
   Box,
   Paper,
   Grid,
-  TextField,
   Button,
-  Divider,
   FormControl,
   InputLabel,
   Select,
@@ -50,9 +48,9 @@ const Historical = () => {
   // Fetch data when ticker or days change
   useEffect(() => {
     fetchHistoricalData(timeRange);
-  }, [ticker]);
+  }, [ticker, timeRange, fetchHistoricalData]);
 
-  const fetchHistoricalData = async (range = timeRange) => {
+  const fetchHistoricalData = useCallback(async (range = timeRange) => {
     setLoading(true);
     setError(null);
 
@@ -65,7 +63,7 @@ const Historical = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ticker, days, timeRange]);
 
   const handleDaysChange = (event) => {
     setDays(event.target.value);

@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/myapp/tradinglab/pkg/events"
-	pb "github.com/myapp/tradinglab/trading"
+	pb "github.com/myapp/tradinglab/proto"
 )
 
 // API Gateway for TradingLab

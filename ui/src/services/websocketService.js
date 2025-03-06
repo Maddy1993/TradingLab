@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const BASE_URL = window.location.protocol === 'https:'
     ? `wss://${window.location.host}/api/ws`
@@ -130,7 +130,7 @@ export const useWebSocketConnection = () => {
     return true;
   };
 
-  const connect = () => {
+  const connect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.close();
     }
@@ -174,7 +174,7 @@ export const useWebSocketConnection = () => {
         });
       }
     };
-  };
+  }, []);
 
   // Function to manually reconnect
   const reconnect = () => {
@@ -198,7 +198,7 @@ export const useWebSocketConnection = () => {
         socketRef.current.close();
       }
     };
-  }, []);
+  }, [connect]);
 
   return { connected, subscribe, unsubscribe, reconnect, error };
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Typography,
   Box,
@@ -10,15 +10,13 @@ import {
   MenuItem,
   Button,
   Divider,
-  Alert,
-  TextField,
-  Chip
+  Alert
 } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import CallMadeIcon from '@mui/icons-material/CallMade';
 import CallReceivedIcon from '@mui/icons-material/CallReceived';
 import axios from 'axios';
-import { format } from 'date-fns';
+// import { format } from 'date-fns';
 import RecommendationCard from '../components/RecommendationCard';
 import Loading from '../components/Loading';
 
@@ -47,14 +45,14 @@ const Recommendations = () => {
   // Fetch data when component mounts
   useEffect(() => {
     fetchRecommendations();
-  }, [ticker]);
+  }, [ticker, fetchRecommendations]);
 
   // Apply filter when recommendations or filter changes
   useEffect(() => {
     applyFilter();
-  }, [recommendations, filter]);
+  }, [recommendations, filter, applyFilter]);
 
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -67,9 +65,9 @@ const Recommendations = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ticker, days, strategy]);
 
-  const applyFilter = () => {
+  const applyFilter = useCallback(() => {
     if (filter === 'ALL') {
       setFilteredRecommendations(recommendations);
     } else if (filter === 'LONG') {
@@ -81,7 +79,7 @@ const Recommendations = () => {
     } else if (filter === 'PUT') {
       setFilteredRecommendations(recommendations.filter(rec => rec.option_type === 'PUT'));
     }
-  };
+  }, [filter, recommendations]);
 
   const handleDaysChange = (event) => {
     setDays(event.target.value);
