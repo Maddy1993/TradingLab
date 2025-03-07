@@ -52,17 +52,19 @@ class ErrorBoundary extends React.Component {
           <Typography variant="body1">
             Please try refreshing the page. If the problem persists, contact support.
           </Typography>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            sx={{ mt: 2 }}
-            onClick={() => {
-              this.setState({ hasError: false });
-              window.location.href = '/';
-            }}
-          >
-            Return to Dashboard
-          </Button>
+          {/* Button is imported separately to avoid initialization issues */}
+          <Box sx={{ mt: 2 }}>
+            <a href="/" style={{ 
+              backgroundColor: '#3f51b5', 
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              textDecoration: 'none',
+              display: 'inline-block'
+            }}>
+              Return to Dashboard
+            </a>
+          </Box>
         </Box>
       );
     }
@@ -116,61 +118,51 @@ const theme = createTheme({
 const drawerWidth = 240;
 
 function App() {
-  const [isLoading, setIsLoading] = useState(true);
+  // Simplified loading approach to avoid dependency issues
+  const [isReady, setIsReady] = useState(false);
 
-  // Add effect to ensure UI is ready
+  // Use simple approach to ensure DOM is fully loaded
   useEffect(() => {
-    // Short timeout to ensure the DOM is fully loaded
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 500);
-    
+    const timer = setTimeout(() => setIsReady(true), 100);
     return () => clearTimeout(timer);
   }, []);
 
-  const LoadingFallback = () => (
-    <Box sx={{ 
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh'
-    }}>
-      <CircularProgress size={60} />
-      <Typography variant="h6" sx={{ mt: 2 }}>
-        Loading TradingLab...
-      </Typography>
+  // Simple loading component
+  const Loading = () => (
+    <Box 
+      sx={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        alignItems: 'center', 
+        justifyContent: 'center',
+        p: 3,
+        height: '100vh'
+      }}
+    >
+      <Typography variant="h4">Loading TradingLab...</Typography>
     </Box>
   );
 
-  if (isLoading) {
-    return (
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <LoadingFallback />
-      </ThemeProvider>
-    );
-  }
-
+  // Simplified app to avoid potential initialization issues
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <ErrorBoundary>
-        <Router>
-          <Box sx={{ display: 'flex' }}>
-            <Navbar drawerWidth={drawerWidth} />
-            <Sidebar drawerWidth={drawerWidth} />
-            <Box
-              component="main"
-              sx={{
-                flexGrow: 1,
-                p: 3,
-                width: { sm: `calc(100% - ${drawerWidth}px)` },
-                ml: { sm: `${drawerWidth}px` },
-                mt: '64px',
-              }}
-            >
-              <Suspense fallback={<LoadingFallback />}>
+      {!isReady ? <Loading /> : (
+        <ErrorBoundary>
+          <Router>
+            <Box sx={{ display: 'flex' }}>
+              <Navbar drawerWidth={drawerWidth} />
+              <Sidebar drawerWidth={drawerWidth} />
+              <Box
+                component="main"
+                sx={{
+                  flexGrow: 1,
+                  p: 3,
+                  width: { sm: `calc(100% - ${drawerWidth}px)` },
+                  ml: { sm: `${drawerWidth}px` },
+                  mt: '64px',
+                }}
+              >
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/dashboard" element={<Dashboard />} />
@@ -178,14 +170,13 @@ function App() {
                   <Route path="/signals" element={<Signals />} />
                   <Route path="/backtest" element={<Backtest />} />
                   <Route path="/recommendations" element={<Recommendations />} />
-                  {/* Add a catch-all route that redirects to Dashboard */}
                   <Route path="*" element={<Dashboard />} />
                 </Routes>
-              </Suspense>
+              </Box>
             </Box>
-          </Box>
-        </Router>
-      </ErrorBoundary>
+          </Router>
+        </ErrorBoundary>
+      )}
     </ThemeProvider>
   );
 }
