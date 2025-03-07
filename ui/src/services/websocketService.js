@@ -27,6 +27,9 @@ try {
   BASE_URL = '/api/ws';
 }
 
+// Special subject for system status updates
+const SYSTEM_STATUS_SUBJECT = 'system.status';
+
 // Hook for subscribing to market data
 export const useMarketData = (ticker) => {
   const [marketData, setMarketData] = useState(null);
@@ -37,7 +40,17 @@ export const useMarketData = (ticker) => {
 
     const subject = `market.live.${ticker}`;
     const handleMarketData = (data) => {
-      setMarketData(data);
+      // Check if the data includes caching information
+      if (data && data.metadata && data.metadata.isCached) {
+        // Add caching information to the market data
+        setMarketData({
+          ...data,
+          isCached: true,
+          timestamp: data.metadata.timestamp || new Date().toISOString()
+        });
+      } else {
+        setMarketData(data);
+      }
     };
 
     subscribe(subject, handleMarketData);
@@ -60,7 +73,20 @@ export const useSignals = (ticker) => {
 
     const subject = `signals.${ticker}`;
     const handleSignal = (data) => {
-      setSignals((prevSignals) => [...prevSignals, data]);
+      // Check if the data includes caching information
+      if (data && data.metadata && data.metadata.isCached) {
+        // Add caching flag to the signal data
+        setSignals((prevSignals) => [
+          ...prevSignals, 
+          {
+            ...data,
+            isCached: true,
+            timestamp: data.metadata.timestamp || new Date().toISOString()
+          }
+        ]);
+      } else {
+        setSignals((prevSignals) => [...prevSignals, data]);
+      }
     };
 
     subscribe(subject, handleSignal);
@@ -82,6 +108,15 @@ export const useWebSocketConnection = () => {
   const subscribersRef = useRef({});
   const reconnectTimeoutRef = useRef(null);
   const reconnectCountRef = useRef(0);
+  
+  // Always subscribe to system status by default
+  useEffect(() => {
+    if (connected && !subscriptionsRef.current[SYSTEM_STATUS_SUBJECT]) {
+      // Auto-subscribe to system status
+      sendSubscriptionRequest(SYSTEM_STATUS_SUBJECT);
+      subscriptionsRef.current[SYSTEM_STATUS_SUBJECT] = true;
+    }
+  }, [connected]);
 
   // Function to send subscription/unsubscription request
   const sendSubscriptionRequest = (subject, isUnsubscribe = false) => {
@@ -124,6 +159,12 @@ export const useWebSocketConnection = () => {
   // Unsubscribe from a subject
   const unsubscribe = (subject, callback) => {
     if (!subject) {
+      return false;
+    }
+
+    // Don't allow unsubscribing from system status subject
+    if (subject === SYSTEM_STATUS_SUBJECT) {
+      console.warn('Cannot unsubscribe from system status subject');
       return false;
     }
 
@@ -181,10 +222,19 @@ export const useWebSocketConnection = () => {
         console.log('WebSocket connected successfully');
         setConnected(true);
         setError(null);
+        reconnectCountRef.current = 0; // Reset reconnect count on successful connection
 
-        // Resubscribe to all subjects on reconnect
+        // Subscribe to system status first
+        if (!subscriptionsRef.current[SYSTEM_STATUS_SUBJECT]) {
+          sendSubscriptionRequest(SYSTEM_STATUS_SUBJECT);
+          subscriptionsRef.current[SYSTEM_STATUS_SUBJECT] = true;
+        }
+
+        // Then resubscribe to all subjects on reconnect
         Object.keys(subscriptionsRef.current).forEach((subject) => {
-          sendSubscriptionRequest(subject);
+          if (subject !== SYSTEM_STATUS_SUBJECT) { // Already handled system status
+            sendSubscriptionRequest(subject);
+          }
         });
       };
 
@@ -192,13 +242,15 @@ export const useWebSocketConnection = () => {
         console.log('WebSocket closed:', event.code, event.reason);
         setConnected(false);
 
-        // Attempt to reconnect
+        // Attempt to reconnect with exponential backoff
         if (reconnectCountRef.current < 5) {
-          console.log(`Reconnecting (attempt ${reconnectCountRef.current + 1}/5) in 3s...`);
+          const backoffTime = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current), 30000);
+          console.log(`Reconnecting (attempt ${reconnectCountRef.current + 1}/5) in ${backoffTime/1000}s...`);
+          
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectCountRef.current += 1;
             connect();
-          }, 3000);
+          }, backoffTime);
         } else {
           setError('Maximum reconnection attempts reached');
         }
@@ -213,6 +265,11 @@ export const useWebSocketConnection = () => {
         try {
           const message = JSON.parse(event.data);
           const { subject, data } = message;
+
+          if (subject === SYSTEM_STATUS_SUBJECT) {
+            // Always log system status messages to console
+            console.log('System status update:', data);
+          }
 
           if (subscribersRef.current[subject]) {
             subscribersRef.current[subject].forEach((callback) => {
@@ -231,12 +288,14 @@ export const useWebSocketConnection = () => {
       console.error('Failed to create WebSocket connection:', connectionError);
       setError(`Connection error: ${connectionError.message}`);
       
-      // Try to reconnect even on connection errors
+      // Try to reconnect even on connection errors with exponential backoff
       if (reconnectCountRef.current < 5) {
+        const backoffTime = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current), 30000);
+        
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectCountRef.current += 1;
           connect();
-        }, 3000);
+        }, backoffTime);
       }
     }
   }, []);

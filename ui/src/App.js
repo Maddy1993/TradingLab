@@ -8,6 +8,7 @@ import { CircularProgress, Alert, Typography, Button } from '@mui/material';
 // Components
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
+import SystemStatusBanner from './components/SystemStatusBanner';
 
 // Pages - Using eager loading for Dashboard to ensure it loads quickly
 import Dashboard from './pages/Dashboard';
@@ -52,7 +53,6 @@ class ErrorBoundary extends React.Component {
           <Typography variant="body1">
             Please try refreshing the page. If the problem persists, contact support.
           </Typography>
-          {/* Button is imported separately to avoid initialization issues */}
           <Box sx={{ mt: 2 }}>
             <a href="/" style={{ 
               backgroundColor: '#3f51b5', 
@@ -87,6 +87,18 @@ const theme = createTheme({
       default: '#121212',
       paper: '#1e1e1e',
     },
+    warning: {
+      main: '#ff9800',
+    },
+    error: {
+      main: '#f44336',
+    },
+    success: {
+      main: '#4caf50',
+    },
+    info: {
+      main: '#2196f3',
+    },
   },
   typography: {
     fontFamily: [
@@ -108,6 +120,29 @@ const theme = createTheme({
         root: {
           backgroundColor: '#1e1e1e',
           borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+        },
+      },
+    },
+    MuiAlert: {
+      styleOverrides: {
+        root: {
+          borderRadius: 4,
+        },
+        standardWarning: {
+          backgroundColor: 'rgba(255, 152, 0, 0.1)',
+          color: '#ff9800',
+        },
+        standardError: {
+          backgroundColor: 'rgba(244, 67, 54, 0.1)',
+          color: '#f44336',
+        },
+        standardInfo: {
+          backgroundColor: 'rgba(33, 150, 243, 0.1)',
+          color: '#2196f3',
+        },
+        standardSuccess: {
+          backgroundColor: 'rgba(76, 175, 80, 0.1)',
+          color: '#4caf50',
         },
       },
     },
@@ -168,6 +203,11 @@ function App() {
                   mt: '64px',
                 }}
               >
+                {/* System status banner at the top of the content area */}
+                <ErrorBoundary>
+                  <SystemStatusBanner />
+                </ErrorBoundary>
+                
                 <Routes>
                   <Route path="/" element={
                     <ErrorBoundary>

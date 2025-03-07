@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { AppBar, Toolbar, Typography, IconButton, Box, MenuItem, FormControl, Select } from '@mui/material';
+import { AppBar, Toolbar, Typography, IconButton, Box, MenuItem, FormControl, Select, Divider } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import axios from 'axios';
+import StatusIndicator from './StatusIndicator';
+import { useSystemStatus, STATUS_LEVELS } from '../hooks/useSystemStatus';
 
 const Navbar = ({ drawerWidth }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState('SPY');
   const [tickers, setTickers] = useState(['SPY', 'AAPL', 'MSFT', 'GOOGL', 'AMZN']);
+  const { status, isTradingDisabled } = useSystemStatus();
 
   useEffect(() => {
     const fetchTickers = async () => {
@@ -21,6 +24,14 @@ const Navbar = ({ drawerWidth }) => {
     };
 
     fetchTickers();
+  }, []);
+
+  useEffect(() => {
+    // Load selected ticker from localStorage on component mount
+    const savedTicker = localStorage.getItem('selectedTicker');
+    if (savedTicker) {
+      setSelectedTicker(savedTicker);
+    }
   }, []);
 
   const handleDrawerToggle = () => {
@@ -58,7 +69,12 @@ const Navbar = ({ drawerWidth }) => {
             TradingLab Dashboard
           </Typography>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+          {/* Status indicator */}
+          <StatusIndicator />
+          
+          <Divider orientation="vertical" flexItem sx={{ mx: 2, display: { xs: 'none', sm: 'block' } }} />
+
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Typography variant="body1" sx={{ mr: 2 }}>
               Ticker:
             </Typography>
@@ -68,6 +84,7 @@ const Navbar = ({ drawerWidth }) => {
                   onChange={handleTickerChange}
                   displayEmpty
                   inputProps={{ 'aria-label': 'Select Ticker' }}
+                  disabled={isTradingDisabled()}
               >
                 {tickers.map((ticker) => (
                     <MenuItem key={ticker} value={ticker}>

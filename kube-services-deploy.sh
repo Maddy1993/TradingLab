@@ -5,7 +5,7 @@ set -e  # Exit on error
 
 # Environment variables
 export REGISTRY="us-central1-docker.pkg.dev/financetracker-451021/tradinglab"
-export VERSION=$(git describe --tags --always || echo "dev")
+export VERSION=$(git describe --tags --always --dirty || echo "dev")
 # Remove the "dirty" suffix which causes image pull issues
 export NAMESPACE="tradinglab"
 

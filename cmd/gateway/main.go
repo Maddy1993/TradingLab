@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,6 +38,7 @@ type APIGateway struct {
 	wsClients      map[*websocket.Conn]bool
 	wsClientsMutex sync.Mutex
 	upgrader       websocket.Upgrader
+	cache          *DataCache
 }
 
 func NewAPIGateway(natsURL, tradingServiceURL string) (*APIGateway, error) {
@@ -71,6 +74,7 @@ func NewAPIGateway(natsURL, tradingServiceURL string) (*APIGateway, error) {
 		router:        router,
 		wsClients:     make(map[*websocket.Conn]bool),
 		upgrader:      upgrader,
+		cache:         NewDataCache(),
 	}, nil
 }
 
@@ -80,6 +84,9 @@ func (g *APIGateway) setupRoutes() {
 
 	// Health check
 	api.HandleFunc("/health", g.healthHandler).Methods("GET")
+
+	// System status
+	api.HandleFunc("/status", g.statusHandler).Methods("GET")
 
 	// Available tickers
 	api.HandleFunc("/tickers", g.tickersHandler).Methods("GET")
@@ -103,6 +110,49 @@ func (g *APIGateway) setupRoutes() {
 	g.router.PathPrefix("/").Handler(http.FileServer(http.Dir("./ui/build")))
 }
 
+func (g *APIGateway) statusHandler(w http.ResponseWriter, r *http.Request) {
+	// Get system status
+	status := g.cache.GetServiceStatus()
+
+	// Add connection information
+	grpcStatus := "connected"
+	natsStatus := "connected"
+
+	if g.tradingConn == nil {
+		grpcStatus = "disconnected"
+	} else if g.tradingConn.GetState().String() != "READY" {
+		grpcStatus = fmt.Sprintf("not ready: %s", g.tradingConn.GetState().String())
+	}
+
+	if g.natsClient == nil {
+		natsStatus = "disconnected"
+	} else if !g.natsClient.GetNATS().IsConnected() {
+		natsStatus = "disconnected"
+	}
+
+	// Add connection status to response
+	status["connections"] = map[string]string{
+		"grpc": grpcStatus,
+		"nats": natsStatus,
+	}
+
+	// Add cache stats
+	g.cache.mutex.RLock()
+	cacheStats := map[string]interface{}{
+		"historical_data_count":  len(g.cache.historicalData),
+		"signals_count":          len(g.cache.signals),
+		"recommendations_count":  len(g.cache.recommendations),
+		"backtest_results_count": len(g.cache.backtestResults),
+	}
+	g.cache.mutex.RUnlock()
+
+	status["cache_stats"] = cacheStats
+	status["timestamp"] = time.Now().Format(time.RFC3339)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
 func (g *APIGateway) healthHandler(w http.ResponseWriter, r *http.Request) {
 	// Quick health check without making external calls, to meet Kubernetes probes
 	response := map[string]interface{}{
@@ -113,26 +163,19 @@ func (g *APIGateway) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Only perform deep health check for non-probe requests
 	if r.Header.Get("User-Agent") != "kube-probe/1.27" {
-		// Check gRPC connection with longer timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// Create a simple request to check if the gRPC service is responsive
-		req := &pb.HistoricalDataRequest{
-			Ticker: "SPY",
-			Days:   1,
-		}
-
-		// Try to get a response
-		_, err := g.tradingClient.GetHistoricalData(ctx, req)
+		// Check gRPC connection with a ping rather than full historical data
 		grpcStatus := "connected"
-		if err != nil {
-			grpcStatus = fmt.Sprintf("error: %v", err)
-			log.Printf("gRPC health check failed: %v", err)
+		natsStatus := "connected"
+
+		// Check if connections exist at a basic level
+		if g.tradingConn == nil {
+			grpcStatus = "disconnected"
+			log.Printf("gRPC connection is nil")
+		} else if g.tradingConn.GetState().String() != "READY" {
+			grpcStatus = fmt.Sprintf("not ready: %s", g.tradingConn.GetState().String())
+			log.Printf("gRPC connection not ready: %s", g.tradingConn.GetState().String())
 		}
 
-		// Check NATS connection
-		natsStatus := "connected"
 		if g.natsClient == nil {
 			natsStatus = "disconnected"
 			log.Printf("NATS connection unavailable")
@@ -182,8 +225,17 @@ func (g *APIGateway) historicalDataHandler(w http.ResponseWriter, r *http.Reques
 		interval = "15min"
 	}
 
-	// Create gRPC request
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Create cache key
+	cacheKey := fmt.Sprintf("%s:%d:%s", ticker, days, interval)
+
+	// Track failures for system status
+	var systemFailures int
+	defer func() {
+		g.cache.updateServiceStatus("historical-data", systemFailures)
+	}()
+
+	// Create gRPC request with longer timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	req := &pb.HistoricalDataRequest{
@@ -192,28 +244,297 @@ func (g *APIGateway) historicalDataHandler(w http.ResponseWriter, r *http.Reques
 		Interval: interval,
 	}
 
-	// Call gRPC service
-	resp, err := g.tradingClient.GetHistoricalData(ctx, req)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error fetching historical data: %v", err), http.StatusInternalServerError)
+	// Call gRPC service with retry logic
+	var resp *pb.HistoricalDataResponse
+	var err error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			log.Printf("Retrying historical data request for %s (attempt %d/%d)", ticker, attempt, maxRetries)
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
+		}
+
+		resp, err = g.tradingClient.GetHistoricalData(ctx, req)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		log.Printf("Historical data request failed (attempt %d/%d): %v", attempt, maxRetries, err)
+		systemFailures++
+
+		if attempt == maxRetries || ctx.Err() != nil {
+			// All retries failed or context timeout
+			break
+		}
+	}
+
+	// Convert to JSON-friendly format if we have a response
+	var candles []map[string]interface{}
+
+	if err == nil {
+		// Process successful response
+		candles = make([]map[string]interface{}, 0, len(resp.Candles))
+		for _, candle := range resp.Candles {
+			candles = append(candles, map[string]interface{}{
+				"date":   candle.Date,
+				"open":   candle.Open,
+				"high":   candle.High,
+				"low":    candle.Low,
+				"close":  candle.Close,
+				"volume": candle.Volume,
+			})
+		}
+
+		// Cache the successful response
+		g.cache.CacheHistoricalData(cacheKey, candles)
+
+		// Return the data
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(candles)
 		return
 	}
 
-	// Convert gRPC response to JSON-friendly format
-	candles := make([]map[string]interface{}, 0, len(resp.Candles))
-	for _, candle := range resp.Candles {
-		candles = append(candles, map[string]interface{}{
-			"date":   candle.Date,
-			"open":   candle.Open,
-			"high":   candle.High,
-			"low":    candle.Low,
-			"close":  candle.Close,
-			"volume": candle.Volume,
-		})
+	// All retries failed, try to use cached data
+	cachedData, exists := g.cache.GetCachedHistoricalData(cacheKey)
+	if exists {
+		log.Printf("Using cached historical data for %s (%.1f minutes old)",
+			ticker, time.Since(cachedData.Timestamp).Minutes())
+
+		// Add headers to indicate cache usage
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Data-Source", "cache")
+		w.Header().Set("X-Data-Age", fmt.Sprintf("%.1f minutes", time.Since(cachedData.Timestamp).Minutes()))
+		w.Header().Set("X-System-Mode", g.cache.GetServiceStatus()["mode"].(string))
+
+		// Return cached data
+		json.NewEncoder(w).Encode(cachedData.Data)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(candles)
+	// No cached data available
+	if g.cache.GetServiceStatus()["mode"] == "readonly" {
+		// In read-only mode, return a specific error
+		http.Error(w, "System is in read-only mode. No cached data available for this request.", http.StatusServiceUnavailable)
+	} else {
+		// Otherwise return a standard error
+		http.Error(w, fmt.Sprintf("Error fetching historical data after %d attempts: %v", maxRetries, err), http.StatusInternalServerError)
+	}
+}
+
+// DataCache stores recent valid responses to serve in fallback mode
+type DataCache struct {
+	mutex             sync.RWMutex
+	historicalData    map[string]CachedData
+	signals           map[string]CachedData
+	recommendations   map[string]CachedData
+	backtestResults   map[string]CachedData
+	serviceMode       string // "normal", "degraded", "readonly"
+	lastStatusChange  time.Time
+	statusDescription string
+}
+
+// CachedData stores response data with metadata
+type CachedData struct {
+	Data      interface{}
+	Timestamp time.Time
+	Source    string // Origin of the data (e.g., "alpaca", "cache")
+}
+
+// NewDataCache creates a new data cache
+func NewDataCache() *DataCache {
+	return &DataCache{
+		historicalData:    make(map[string]CachedData),
+		signals:           make(map[string]CachedData),
+		recommendations:   make(map[string]CachedData),
+		backtestResults:   make(map[string]CachedData),
+		serviceMode:       "normal",
+		lastStatusChange:  time.Now(),
+		statusDescription: "System operating normally",
+	}
+}
+
+// cacheSystems keeps track of which systems are having issues
+func (c *DataCache) updateServiceStatus(failedSystem string, failureCount int) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Determine system state based on failures
+	oldMode := c.serviceMode
+
+	if failureCount > 5 {
+		c.serviceMode = "readonly"
+		c.statusDescription = fmt.Sprintf("System in read-only mode: %s unavailable", failedSystem)
+	} else if failureCount > 2 {
+		c.serviceMode = "degraded"
+		c.statusDescription = fmt.Sprintf("System in degraded mode: %s experiencing issues", failedSystem)
+	} else if failureCount == 0 {
+		c.serviceMode = "normal"
+		c.statusDescription = "System operating normally"
+	}
+
+	// If status changed, update timestamp
+	if oldMode != c.serviceMode {
+		c.lastStatusChange = time.Now()
+		log.Printf("Service status changed to %s: %s", c.serviceMode, c.statusDescription)
+	}
+}
+
+// GetServiceStatus returns the current system status
+func (c *DataCache) GetServiceStatus() map[string]interface{} {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return map[string]interface{}{
+		"mode":               c.serviceMode,
+		"description":        c.statusDescription,
+		"last_status_change": c.lastStatusChange.Format(time.RFC3339),
+		"readonly":           c.serviceMode == "readonly",
+	}
+}
+
+// CacheHistoricalData caches historical data for a ticker
+func (c *DataCache) CacheHistoricalData(key string, data interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.historicalData[key] = CachedData{
+		Data:      data,
+		Timestamp: time.Now(),
+		Source:    "live",
+	}
+}
+
+// GetCachedHistoricalData retrieves cached historical data
+func (c *DataCache) GetCachedHistoricalData(key string) (CachedData, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	data, exists := c.historicalData[key]
+	return data, exists
+}
+
+// CacheSignalData caches signal data
+func (c *DataCache) CacheSignalData(key string, data interface{}) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.signals[key] = CachedData{
+		Data:      data,
+		Timestamp: time.Now(),
+		Source:    "live",
+	}
+}
+
+// GetCachedSignalData retrieves cached signal data
+func (c *DataCache) GetCachedSignalData(key string) (CachedData, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	data, exists := c.signals[key]
+	return data, exists
+}
+
+// Simple string hash function
+func hash(s string) uint32 {
+	h := uint32(0)
+	for i := 0; i < len(s); i++ {
+		h = h*31 + uint32(s[i])
+	}
+	return h
+}
+
+// generateFallbackCandles creates sample market data when real data is unavailable
+func generateFallbackCandles(ticker string, days int, interval string) []map[string]interface{} {
+	// Only generate fallback data for 30 days or less
+	if days > 30 {
+		return nil
+	}
+
+	// Seed random number generator with ticker name for consistent results
+	source := rand.NewSource(int64(hash(ticker)))
+	rng := rand.New(source)
+
+	// Set base price based on ticker
+	var basePrice float64
+	switch ticker {
+	case "SPY":
+		basePrice = 420.0
+	case "AAPL":
+		basePrice = 175.0
+	case "MSFT":
+		basePrice = 400.0
+	case "GOOGL":
+		basePrice = 140.0
+	case "AMZN":
+		basePrice = 175.0
+	default:
+		basePrice = 100.0
+	}
+
+	// Determine number of candles based on interval
+	candlesPerDay := 1
+	if interval == "15min" {
+		candlesPerDay = 26 // ~6.5 trading hours / 15min
+	} else if interval == "5min" {
+		candlesPerDay = 78 // ~6.5 trading hours / 5min
+	} else if interval == "60min" {
+		candlesPerDay = 7 // ~6.5 trading hours / 60min
+	}
+
+	totalCandles := days * candlesPerDay
+	if totalCandles > 1000 {
+		totalCandles = 1000 // Cap at 1000 candles
+	}
+
+	// Generate candles
+	candles := make([]map[string]interface{}, totalCandles)
+	now := time.Now()
+
+	for i := 0; i < totalCandles; i++ {
+		// Calculate time, moving backward from now
+		var candleTime time.Time
+		if interval == "day" {
+			candleTime = now.AddDate(0, 0, -i)
+		} else {
+			minutesInterval := 15
+			if interval == "5min" {
+				minutesInterval = 5
+			} else if interval == "60min" {
+				minutesInterval = 60
+			}
+			candleTime = now.Add(-time.Duration(i*minutesInterval) * time.Minute)
+		}
+
+		// Generate price movements (basic random walk with trend)
+		volatility := basePrice * 0.01 // 1% volatility
+		priceChange := (rng.Float64()*2 - 1) * volatility
+		trend := -0.0001 * float64(i) * basePrice // Slight downtrend
+
+		// Calculate candle values
+		close := basePrice + priceChange + trend
+		open := close - (rng.Float64()*2-1)*volatility*0.5
+		high := math.Max(open, close) + rng.Float64()*volatility*0.5
+		low := math.Min(open, close) - rng.Float64()*volatility*0.5
+		volume := 100000 + rng.Float64()*900000
+
+		// Format date to match expected format
+		date := candleTime.Format("2006-01-02T15:04:05Z")
+
+		candles[i] = map[string]interface{}{
+			"date":   date,
+			"open":   open,
+			"high":   high,
+			"low":    low,
+			"close":  close,
+			"volume": volume,
+		}
+
+		// Update base price for next candle
+		basePrice = close
+	}
+
+	return candles
 }
 
 func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
@@ -245,8 +566,17 @@ func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
 		interval = "15min"
 	}
 
-	// Create gRPC request
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Create cache key
+	cacheKey := fmt.Sprintf("%s:%d:%s:%s", ticker, days, strategy, interval)
+
+	// Track failures for system status
+	var systemFailures int
+	defer func() {
+		g.cache.updateServiceStatus("signals", systemFailures)
+	}()
+
+	// Create gRPC request with longer timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	req := &pb.SignalRequest{
@@ -256,26 +586,81 @@ func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
 		Interval: interval,
 	}
 
-	// Call gRPC service
-	resp, err := g.tradingClient.GenerateSignals(ctx, req)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error generating signals: %v", err), http.StatusInternalServerError)
+	// Call gRPC service with retry logic
+	var resp *pb.SignalResponse
+	var err error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			log.Printf("Retrying signal generation for %s (attempt %d/%d)", ticker, attempt, maxRetries)
+			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
+		}
+
+		resp, err = g.tradingClient.GenerateSignals(ctx, req)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		log.Printf("Signal generation failed (attempt %d/%d): %v", attempt, maxRetries, err)
+		systemFailures++
+
+		if attempt == maxRetries || ctx.Err() != nil {
+			// All retries failed or context timeout
+			break
+		}
+	}
+
+	// Convert to JSON-friendly format if we have a response
+	var signals []map[string]interface{}
+
+	if err == nil {
+		// Process successful response
+		signals = make([]map[string]interface{}, 0, len(resp.Signals))
+		for _, signal := range resp.Signals {
+			signals = append(signals, map[string]interface{}{
+				"date":        signal.Date,
+				"signal_type": signal.SignalType,
+				"entry_price": signal.EntryPrice,
+				"stoploss":    signal.Stoploss,
+			})
+		}
+
+		// Cache the successful response
+		g.cache.CacheSignalData(cacheKey, signals)
+
+		// Return the data
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(signals)
 		return
 	}
 
-	// Convert gRPC response to JSON-friendly format
-	signals := make([]map[string]interface{}, 0, len(resp.Signals))
-	for _, signal := range resp.Signals {
-		signals = append(signals, map[string]interface{}{
-			"date":        signal.Date,
-			"signal_type": signal.SignalType,
-			"entry_price": signal.EntryPrice,
-			"stoploss":    signal.Stoploss,
-		})
+	// All retries failed, try to use cached data
+	cachedData, exists := g.cache.GetCachedSignalData(cacheKey)
+	if exists {
+		log.Printf("Using cached signal data for %s (%.1f minutes old)",
+			ticker, time.Since(cachedData.Timestamp).Minutes())
+
+		// Add headers to indicate cache usage
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Data-Source", "cache")
+		w.Header().Set("X-Data-Age", fmt.Sprintf("%.1f minutes", time.Since(cachedData.Timestamp).Minutes()))
+		w.Header().Set("X-System-Mode", g.cache.GetServiceStatus()["mode"].(string))
+
+		// Return cached data
+		json.NewEncoder(w).Encode(cachedData.Data)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(signals)
+	// No cached data available
+	if g.cache.GetServiceStatus()["mode"] == "readonly" {
+		// In read-only mode, return a specific error
+		w.Header().Set("Retry-After", "300") // Suggest retry after 5 minutes
+		http.Error(w, "System is in read-only mode. No cached signals available for this request.", http.StatusServiceUnavailable)
+	} else {
+		// Otherwise return a standard error
+		http.Error(w, fmt.Sprintf("Error generating signals after %d attempts: %v", maxRetries, err), http.StatusInternalServerError)
+	}
 }
 
 func (g *APIGateway) backtestHandler(w http.ResponseWriter, r *http.Request) {
