@@ -106,12 +106,23 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        # Sanitize durable name - remove invalid characters
-        safe_ticker = re.sub(r'[.*>]', '-', ticker)
-        durable_name = f"market-data-consumer-{safe_ticker}"
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
-        self.subscriptions[subject] = sub
-        return sub
+        try:
+            # Replace any wildcard or special characters with 'all' for wildcard case
+            if ticker == '*':
+                safe_ticker = 'all'
+            else:
+                # Only allow alphanumeric and hyphen in durable names
+                safe_ticker = re.sub(r'[^a-zA-Z0-9-]', '-', ticker)
+                
+            durable_name = f"market-data-consumer-{safe_ticker}"
+            sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
+            self.subscriptions[subject] = sub
+            return sub
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to subscribe to market data for {ticker}: {e}")
+            # Return None instead of raising the exception
+            return None
 
     async def subscribe_market_historical(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to historical market data responses."""
@@ -129,12 +140,23 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        # Sanitize durable name - remove invalid characters
-        safe_ticker = re.sub(r'[.*>]', '-', ticker)
-        durable_name = f"historical-data-consumer-{safe_ticker}"
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
-        self.subscriptions[subject] = sub
-        return sub
+        try:
+            # Replace any wildcard or special characters with 'all' for wildcard case
+            if ticker == '*':
+                safe_ticker = 'all'
+            else:
+                # Only allow alphanumeric and hyphen in durable names
+                safe_ticker = re.sub(r'[^a-zA-Z0-9-]', '-', ticker)
+                
+            durable_name = f"historical-data-consumer-{safe_ticker}"
+            sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
+            self.subscriptions[subject] = sub
+            return sub
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to subscribe to historical data for {ticker}: {e}")
+            # Return None instead of raising the exception
+            return None
 
     async def subscribe_signals(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to signals for a ticker."""
@@ -151,12 +173,23 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        # Sanitize durable name - remove invalid characters
-        safe_ticker = re.sub(r'[.*>]', '-', ticker)
-        durable_name = f"signals-consumer-{safe_ticker}"
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
-        self.subscriptions[subject] = sub
-        return sub
+        try:
+            # Replace any wildcard or special characters with 'all' for wildcard case
+            if ticker == '*':
+                safe_ticker = 'all'
+            else:
+                # Only allow alphanumeric and hyphen in durable names
+                safe_ticker = re.sub(r'[^a-zA-Z0-9-]', '-', ticker)
+                
+            durable_name = f"signals-consumer-{safe_ticker}"
+            sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
+            self.subscriptions[subject] = sub
+            return sub
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to subscribe to signals for {ticker}: {e}")
+            # Return None instead of raising the exception
+            return None
 
     async def subscribe_recommendations(self, ticker: str, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Subscribe to recommendations for a ticker."""
@@ -173,12 +206,23 @@ class EventClient:
             except Exception as e:
                 print(f"Error processing message: {e}")
 
-        # Sanitize durable name - remove invalid characters
-        safe_ticker = re.sub(r'[.*>]', '-', ticker)
-        durable_name = f"recommendations-consumer-{safe_ticker}"
-        sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
-        self.subscriptions[subject] = sub
-        return sub
+        try:
+            # Replace any wildcard or special characters with 'all' for wildcard case
+            if ticker == '*':
+                safe_ticker = 'all'
+            else:
+                # Only allow alphanumeric and hyphen in durable names
+                safe_ticker = re.sub(r'[^a-zA-Z0-9-]', '-', ticker)
+                
+            durable_name = f"recommendations-consumer-{safe_ticker}"
+            sub = await self.js.subscribe(subject, cb=message_handler, durable=durable_name)
+            self.subscriptions[subject] = sub
+            return sub
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to subscribe to recommendations for {ticker}: {e}")
+            # Return None instead of raising the exception
+            return None
 
     async def close(self) -> None:
         """Close all subscriptions and connection."""

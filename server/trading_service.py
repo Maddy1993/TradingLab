@@ -136,22 +136,31 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
 
             logging.info(f"GetHistoricalData request for {ticker}, {days} days, interval {interval}")
 
-            # Convert to DataFrame
-            # Note: In a fully event-driven system, we would request this through events
-            # For now, handling synchronously for compatibility
-            loop = asyncio.get_event_loop()
+            # Create a new event loop for this thread if one doesn't exist
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # "There is no current event loop in thread" error
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
             try:
                 data = loop.run_until_complete(self._get_historical_data(ticker, days, interval))
                 df = pd.DataFrame(data)
             except (TimeoutError, ValueError) as e:
                 logging.warning(f"Failed to get data from event system: {e}")
-                logging.warning("Falling back to cached data if available")
-                # Fallback mechanism would go here
-                df = pd.DataFrame()
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(f"Historical data for {ticker} is currently unavailable: {e}")
+                return trading_pb2.HistoricalDataResponse()
+            except Exception as e:
+                logging.error(f"Error retrieving historical data: {e}")
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(f"Error retrieving historical data: {e}")
+                return trading_pb2.HistoricalDataResponse()
 
             if df.empty:
-                context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(f"Failed to get historical data for {ticker}")
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(f"No historical data found for {ticker}")
                 return trading_pb2.HistoricalDataResponse()
 
             # Convert to response format

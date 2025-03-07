@@ -40,11 +40,15 @@ class StreamingStrategyAdapter:
 
             # Subscribe to market data
             try:
-                await self.event_client.subscribe_market_data(
+                subscription = await self.event_client.subscribe_market_data(
                         ticker,
                         callback=lambda data, t=ticker: self._handle_market_data(t, data)
                 )
-                logging.info(f"Subscribed to market data for {ticker}")
+                if subscription:
+                    self.subscribers[ticker] = subscription
+                    logging.info(f"Subscribed to market data for {ticker}")
+                else:
+                    logging.warning(f"Subscription for {ticker} returned None, possibly already subscribed")
             except Exception as e:
                 logging.error(f"Failed to subscribe to market data for {ticker}: {e}")
 
@@ -181,11 +185,15 @@ class StreamingStrategyAdapter:
 
         # Subscribe to market data
         try:
-            await self.event_client.subscribe_market_data(
+            subscription = await self.event_client.subscribe_market_data(
                     ticker,
                     callback=lambda data, t=ticker: self._handle_market_data(t, data)
             )
-            logging.info(f"Started monitoring {ticker}")
+            if subscription:
+                self.subscribers[ticker] = subscription
+                logging.info(f"Started monitoring {ticker}")
+            else:
+                logging.warning(f"Subscription for {ticker} returned None, possibly already subscribed")
         except Exception as e:
             logging.error(f"Failed to subscribe to market data for {ticker}: {e}")
 

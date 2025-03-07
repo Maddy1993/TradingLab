@@ -41,6 +41,7 @@ COPY analysis/ /app/analysis/
 COPY core/ /app/core/
 COPY server/ /app/server/
 COPY events/ /app/events/
+COPY utils/ /app/utils/
 COPY __init__.py /app/
 
 # Create cache directory
