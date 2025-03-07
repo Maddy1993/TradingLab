@@ -10,6 +10,11 @@ metadata:
     nginx.ingress.kubernetes.io/configuration-snippet: |
       try_files $uri $uri/ /index.html;
     nginx.ingress.kubernetes.io/single-spa-support: "true"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "api-gateway"
+    nginx.ingress.kubernetes.io/connection-proxy-header: "keep-alive, Upgrade"
 spec:
   rules:
     - http:

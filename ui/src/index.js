@@ -54,26 +54,32 @@ class RootErrorBoundary extends React.Component {
   }
 }
 
-// Try to safely mount the application
-try {
-  const root = ReactDOM.createRoot(document.getElementById('root'));
-  root.render(
-    <RootErrorBoundary>
-      <App />
-    </RootErrorBoundary>
-  );
-  
-  // Report web vitals
-  reportWebVitals();
-} catch (error) {
-  console.error('Failed to render application:', error);
-  
-  // Fallback if the app can't even mount
-  document.getElementById('root').innerHTML = `
-    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: white; background-color: #121212; padding: 20px;">
-      <h2>Unable to load TradingLab</h2>
-      <p>A critical error occurred while starting the application. Please try again later.</p>
-      <a href="/" style="background-color: #3f51b5; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; margin-top: 20px;">Reload Application</a>
-    </div>
-  `;
-}
+// Create the root element first
+let root;
+
+// Wrap the initialization in a DOMContentLoaded event to ensure the DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  // Try to safely mount the application
+  try {
+    root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+      <RootErrorBoundary>
+        <App />
+      </RootErrorBoundary>
+    );
+    
+    // Report web vitals
+    reportWebVitals();
+  } catch (error) {
+    console.error('Failed to render application:', error);
+    
+    // Fallback if the app can't even mount
+    document.getElementById('root').innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: white; background-color: #121212; padding: 20px;">
+        <h2>Unable to load TradingLab</h2>
+        <p>A critical error occurred while starting the application. Please try again later.</p>
+        <a href="/" style="background-color: #3f51b5; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; margin-top: 20px;">Reload Application</a>
+      </div>
+    `;
+  }
+});

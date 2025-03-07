@@ -56,11 +56,7 @@ const Dashboard = () => {
     };
   }, []);
 
-  // Fetch essential data (historical data and signals) for dashboard
-  useEffect(() => {
-    fetchEssentialData(timeRange);
-  }, [ticker, timeRange, fetchEssentialData]);
-
+  // Define fetchEssentialData function before it's used
   const fetchEssentialData = useCallback(async (range = timeRange) => {
     setHistoricalLoading(true);
     setSignalsLoading(true);
@@ -89,6 +85,11 @@ const Dashboard = () => {
       setSignalsLoading(false);
     }
   }, [ticker, timeRange]);
+  
+  // Fetch essential data (historical data and signals) for dashboard
+  useEffect(() => {
+    fetchEssentialData(timeRange);
+  }, [ticker, timeRange, fetchEssentialData]);
 
   const handleRangeChange = (newRange) => {
     setTimeRange(newRange);

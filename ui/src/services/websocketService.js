@@ -3,9 +3,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // Fix for potential issues when running behind a load balancer or ingress
 const getBaseUrl = () => {
   try {
-    return window.location.protocol === 'https:'
-      ? `wss://${window.location.host}/api/ws`
-      : `ws://${window.location.host}/api/ws`;
+    // Check if window is defined (for SSR compatibility)
+    if (typeof window !== 'undefined' && window.location) {
+      return window.location.protocol === 'https:'
+        ? `wss://${window.location.host}/api/ws`
+        : `ws://${window.location.host}/api/ws`;
+    }
+    // Fallback for when window is not available
+    return '/api/ws';
   } catch (e) {
     console.error('Error constructing WebSocket URL:', e);
     // Fallback to relative URL which will use the same host
@@ -13,7 +18,14 @@ const getBaseUrl = () => {
   }
 };
 
-const BASE_URL = getBaseUrl();
+// Lazy initialization of BASE_URL to prevent reference errors
+let BASE_URL;
+try {
+  BASE_URL = getBaseUrl();
+} catch (e) {
+  console.error('Failed to initialize WebSocket URL:', e);
+  BASE_URL = '/api/ws';
+}
 
 // Hook for subscribing to market data
 export const useMarketData = (ticker) => {
@@ -142,49 +154,91 @@ export const useWebSocketConnection = () => {
   };
 
   const connect = useCallback(() => {
-    if (socketRef.current) {
-      socketRef.current.close();
+    // Safety check to ensure we're in a browser environment
+    if (typeof window === 'undefined' || !window.WebSocket) {
+      console.error('WebSocket not supported in this environment');
+      setError('WebSocket not supported');
+      return;
     }
 
-    const socket = new WebSocket(BASE_URL);
-    socketRef.current = socket;
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch (e) {
+        console.error('Error closing existing socket:', e);
+      }
+    }
 
-    socket.onopen = () => {
-      setConnected(true);
-      setError(null);
+    try {
+      // Re-fetch the BASE_URL in case it's changed
+      const currentUrl = getBaseUrl();
+      const socket = new WebSocket(currentUrl);
+      socketRef.current = socket;
+      
+      console.log('Connecting to WebSocket at:', currentUrl);
 
-      // Resubscribe to all subjects on reconnect
-      Object.keys(subscriptionsRef.current).forEach((subject) => {
-        sendSubscriptionRequest(subject);
-      });
-    };
+      socket.onopen = () => {
+        console.log('WebSocket connected successfully');
+        setConnected(true);
+        setError(null);
 
-    socket.onclose = () => {
-      setConnected(false);
+        // Resubscribe to all subjects on reconnect
+        Object.keys(subscriptionsRef.current).forEach((subject) => {
+          sendSubscriptionRequest(subject);
+        });
+      };
 
-      // Attempt to reconnect
+      socket.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        setConnected(false);
+
+        // Attempt to reconnect
+        if (reconnectCountRef.current < 5) {
+          console.log(`Reconnecting (attempt ${reconnectCountRef.current + 1}/5) in 3s...`);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectCountRef.current += 1;
+            connect();
+          }, 3000);
+        } else {
+          setError('Maximum reconnection attempts reached');
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error('WebSocket error:', err);
+        setError(err.message || 'WebSocket error');
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { subject, data } = message;
+
+          if (subscribersRef.current[subject]) {
+            subscribersRef.current[subject].forEach((callback) => {
+              try {
+                callback(data);
+              } catch (callbackError) {
+                console.error(`Error in subscriber callback for ${subject}:`, callbackError);
+              }
+            });
+          }
+        } catch (parseError) {
+          console.error('Error parsing WebSocket message:', parseError, event.data);
+        }
+      };
+    } catch (connectionError) {
+      console.error('Failed to create WebSocket connection:', connectionError);
+      setError(`Connection error: ${connectionError.message}`);
+      
+      // Try to reconnect even on connection errors
       if (reconnectCountRef.current < 5) {
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectCountRef.current += 1;
           connect();
         }, 3000);
       }
-    };
-
-    socket.onerror = (err) => {
-      setError(err.message || 'WebSocket error');
-    };
-
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      const { subject, data } = message;
-
-      if (subscribersRef.current[subject]) {
-        subscribersRef.current[subject].forEach((callback) => {
-          callback(data);
-        });
-      }
-    };
+    }
   }, []);
 
   // Function to manually reconnect

@@ -151,8 +151,13 @@ function App() {
         <ErrorBoundary>
           <Router>
             <Box sx={{ display: 'flex' }}>
-              <Navbar drawerWidth={drawerWidth} />
-              <Sidebar drawerWidth={drawerWidth} />
+              {/* Add error boundaries around individual components */}
+              <ErrorBoundary>
+                <Navbar drawerWidth={drawerWidth} />
+              </ErrorBoundary>
+              <ErrorBoundary>
+                <Sidebar drawerWidth={drawerWidth} />
+              </ErrorBoundary>
               <Box
                 component="main"
                 sx={{
@@ -164,13 +169,49 @@ function App() {
                 }}
               >
                 <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/historical" element={<Historical />} />
-                  <Route path="/signals" element={<Signals />} />
-                  <Route path="/backtest" element={<Backtest />} />
-                  <Route path="/recommendations" element={<Recommendations />} />
-                  <Route path="*" element={<Dashboard />} />
+                  <Route path="/" element={
+                    <ErrorBoundary>
+                      <Dashboard />
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/dashboard" element={
+                    <ErrorBoundary>
+                      <Dashboard />
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/historical" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<Loading />}>
+                        <Historical />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/signals" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<Loading />}>
+                        <Signals />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/backtest" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<Loading />}>
+                        <Backtest />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/recommendations" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<Loading />}>
+                        <Recommendations />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="*" element={
+                    <ErrorBoundary>
+                      <Dashboard />
+                    </ErrorBoundary>
+                  } />
                 </Routes>
               </Box>
             </Box>
