@@ -48,12 +48,45 @@ func NewAPIGateway(natsURL, tradingServiceURL string) (*APIGateway, error) {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	// Connect to TradingLab gRPC service
-	conn, err := grpc.Dial(tradingServiceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to trading service: %w", err)
+	// Connect to TradingLab gRPC service with timeout and retry options
+	var tradingConn *grpc.ClientConn
+	var tradingClient pb.TradingServiceClient
+
+	// Set up gRPC connection options with increased timeout
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+		grpc.WithTimeout(10 * time.Second),
 	}
-	tradingClient := pb.NewTradingServiceClient(conn)
+
+	// Retry logic for establishing gRPC connection
+	maxRetries := 3
+	backoffTime := 1 * time.Second
+	var connErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("Connecting to trading service at %s (attempt %d/%d)", tradingServiceURL, attempt, maxRetries)
+		tradingConn, connErr = grpc.Dial(tradingServiceURL, opts...)
+
+		if connErr == nil {
+			tradingClient = pb.NewTradingServiceClient(tradingConn)
+			log.Printf("Successfully connected to trading service")
+			break
+		}
+
+		log.Printf("Failed to connect to trading service (attempt %d/%d): %v", attempt, maxRetries, connErr)
+
+		if attempt < maxRetries {
+			// Exponential backoff
+			waitTime := backoffTime * time.Duration(attempt)
+			log.Printf("Retrying in %v", waitTime)
+			time.Sleep(waitTime)
+		}
+	}
+
+	if connErr != nil {
+		return nil, fmt.Errorf("failed to connect to trading service after %d attempts: %w", maxRetries, connErr)
+	}
 
 	// Create router
 	router := mux.NewRouter()
@@ -70,7 +103,7 @@ func NewAPIGateway(natsURL, tradingServiceURL string) (*APIGateway, error) {
 	return &APIGateway{
 		natsClient:    natsClient,
 		tradingClient: tradingClient,
-		tradingConn:   conn,
+		tradingConn:   tradingConn,
 		router:        router,
 		wsClients:     make(map[*websocket.Conn]bool),
 		upgrader:      upgrader,
@@ -838,13 +871,44 @@ func (g *APIGateway) recommendationsHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
-	// Upgrade HTTP connection to WebSocket
-	conn, err := g.upgrader.Upgrade(w, r, nil)
+	// Log headers for debugging
+	log.Printf("WebSocket request headers: %+v", r.Header)
+
+	// Make sure we have the required headers for WebSocket upgrade
+	upgradeHeader := r.Header.Get("Upgrade")
+	connectionHeader := r.Header.Get("Connection")
+
+	if !strings.Contains(strings.ToLower(upgradeHeader), "websocket") {
+		log.Printf("Missing 'websocket' in Upgrade header: %s", upgradeHeader)
+		http.Error(w, "WebSocket upgrade required", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.Contains(strings.ToLower(connectionHeader), "upgrade") {
+		log.Printf("Missing 'upgrade' in Connection header: %s", connectionHeader)
+		http.Error(w, "WebSocket upgrade required", http.StatusBadRequest)
+		return
+	}
+
+	// Upgrade HTTP connection to WebSocket with more tolerant header checking
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true // Allow any origin in dev; restrict in production
+		},
+		// This is important - be more lenient with header checking
+		Subprotocols: []string{"websocket"},
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade to websocket: %v", err)
 		return
 	}
 	defer conn.Close()
+
+	log.Printf("WebSocket connection established successfully")
 
 	// Register client
 	g.wsClientsMutex.Lock()
@@ -856,50 +920,70 @@ func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		g.wsClientsMutex.Lock()
 		delete(g.wsClients, conn)
 		g.wsClientsMutex.Unlock()
+		log.Printf("WebSocket connection closed")
 	}()
 
 	// Handle WebSocket messages (for subscription requests)
-	go g.handleWebSocketMessages(conn)
-
-	// Keep connection alive with ping/pong
-	done := make(chan struct{})
+	messageHandler := make(chan error)
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					log.Printf("WebSocket ping failed: %v", err)
-					return
-				}
-			}
-		}
+		messageHandler <- g.handleWebSocketMessages(conn)
 	}()
 
-	// Block until connection is closed
-	<-done
+	// Keep connection alive with ping/pong
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+
+	// Set ping-pong handlers for better connection monitoring
+	conn.SetPingHandler(func(data string) error {
+		// When we receive a ping, respond with a pong
+		return conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(5*time.Second))
+	})
+
+	conn.SetPongHandler(func(data string) error {
+		// When we receive a pong, log it for debugging
+		log.Printf("Received pong from WebSocket client")
+		return nil
+	})
+
+	// Main connection monitoring loop
+	for {
+		select {
+		case err := <-messageHandler:
+			log.Printf("WebSocket message handler returned: %v", err)
+			return
+		case <-pingTicker.C:
+			// Send ping to client
+			pingData := []byte(fmt.Sprintf("ping-%d", time.Now().Unix()))
+			err := conn.WriteControl(websocket.PingMessage, pingData, time.Now().Add(5*time.Second))
+			if err != nil {
+				log.Printf("WebSocket ping failed: %v", err)
+				return
+			}
+		}
+	}
 }
 
-func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
+func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 	// Set up subscriptions based on client messages
 	subscriptions := make(map[string]*nats.Subscription)
 	defer func() {
 		// Clean up subscriptions when connection closes
-		for _, sub := range subscriptions {
-			sub.Unsubscribe()
+		for subject, sub := range subscriptions {
+			log.Printf("Cleaning up subscription to %s", subject)
+			if err := sub.Unsubscribe(); err != nil {
+				log.Printf("Error unsubscribing from %s: %v", subject, err)
+			}
 		}
 	}()
 
 	// Message queue with a buffer to handle slow consumers
-	const maxPendingMessages = 100
+	const maxPendingMessages = 250 // Increased buffer size
 	messageQueue := make(chan []byte, maxPendingMessages)
 
 	// Start message sender goroutine - handles backpressure
 	done := make(chan struct{})
+	senderErrors := make(chan error, 1)
+
 	go func() {
 		defer close(done)
 		for {
@@ -912,10 +996,11 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
 				}
 
 				// Try to write with timeout
-				writeTimeout := time.Second * 2
+				writeTimeout := time.Second * 5 // Increased timeout
 				conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 					log.Printf("Error forwarding message to WebSocket, closing: %v", err)
+					senderErrors <- err
 					return
 				}
 				conn.SetWriteDeadline(time.Time{}) // Reset deadline
@@ -923,19 +1008,43 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
 		}
 	}()
 
+	// Set initial read deadline
+	conn.SetReadDeadline(time.Now().Add(10 * time.Minute))
+
 	for {
+		// Check for sender errors
+		select {
+		case err := <-senderErrors:
+			return fmt.Errorf("message sender error: %w", err)
+		default:
+			// Continue if no errors
+		}
+
 		// Read message
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("Error reading websocket message: %v", err)
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseGoingAway,
+				websocket.CloseNormalClosure,
+				websocket.CloseNoStatusReceived) {
+				log.Printf("Unexpected WebSocket close: %v", err)
+			} else {
+				log.Printf("WebSocket closed: %v", err)
+			}
 			close(messageQueue) // Signal sender to stop
-			return
+			return err
 		}
+
+		// Extend read deadline after each successful message
+		conn.SetReadDeadline(time.Now().Add(10 * time.Minute))
 
 		// Only process text messages
 		if messageType != websocket.TextMessage {
+			log.Printf("Ignoring non-text message type: %d", messageType)
 			continue
 		}
+
+		log.Printf("Received WebSocket message: %s", string(p))
 
 		// Parse subscription request
 		var request struct {
@@ -946,7 +1055,13 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
 		}
 
 		if err := json.Unmarshal(p, &request); err != nil {
-			log.Printf("Error parsing subscription request: %v", err)
+			log.Printf("Error parsing subscription request: %v, message: %s", err, string(p))
+			// Send error message back to client
+			errorMsg := map[string]string{
+				"error": fmt.Sprintf("Invalid message format: %v", err),
+			}
+			errorJSON, _ := json.Marshal(errorMsg)
+			messageQueue <- errorJSON
 			continue
 		}
 

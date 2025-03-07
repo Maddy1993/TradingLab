@@ -96,7 +96,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
         await self.event_client.subscribe_market_historical('*', handle_historical_data)
         logging.info("Subscribed to historical data responses")
 
-    async def _get_historical_data(self, ticker, days, interval='15min', timeout=10):
+    async def _get_historical_data(self, ticker, days, interval='15min', timeout=25):
         """Get historical data through the event system."""
         if not self.event_client:
             raise ValueError("Event client not initialized")
@@ -106,6 +106,7 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
 
         # Check cache first
         if cache_key in self.historical_data_cache:
+            logging.info(f"Using cached historical data for {cache_key}")
             return self.historical_data_cache[cache_key]
 
         # Request historical data
@@ -116,15 +117,27 @@ class TradingServiceServicer(trading_pb2_grpc.TradingServiceServicer):
         }
 
         # Publish request
+        logging.info(f"Publishing historical data request for {ticker}, {days} days, interval {interval}")
         await self.event_client.request_historical_data(ticker, days, interval)
 
-        # Wait for response with timeout
+        # Wait for response with improved timeout and polling
         start_time = now()
+        attempts = 0
         while (now() - start_time).total_seconds() < timeout:
             if cache_key in self.historical_data_cache:
+                logging.info(f"Received historical data for {cache_key} after {(now() - start_time).total_seconds():.2f} seconds")
                 return self.historical_data_cache[cache_key]
-            await asyncio.sleep(0.1)
+            
+            # Gradually increase sleep time to reduce CPU usage
+            sleep_time = min(0.5, 0.1 * (1 + attempts // 5))
+            attempts += 1
+            await asyncio.sleep(sleep_time)
+            
+            # Log progress for long-running requests
+            if attempts % 20 == 0:
+                logging.info(f"Still waiting for historical data for {cache_key} ({(now() - start_time).total_seconds():.2f}s elapsed)")
 
+        logging.error(f"Timeout waiting for historical data for {cache_key} after {timeout} seconds")
         raise TimeoutError(f"Timeout waiting for historical data for {cache_key}")
 
     def GetHistoricalData(self, request, context):

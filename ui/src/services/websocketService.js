@@ -121,15 +121,34 @@ export const useWebSocketConnection = () => {
   // Function to send subscription/unsubscription request
   const sendSubscriptionRequest = (subject, isUnsubscribe = false) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.warn(`Cannot send WebSocket request: socket is ${socketRef.current ? 
+        `in state ${socketRef.current.readyState}` : 'null'}`);
       return false;
     }
-    socketRef.current.send(
-        JSON.stringify({
-          action: isUnsubscribe ? 'unsubscribe' : 'subscribe',
-          subject,
-        })
-    );
-    return true;
+
+    // Create a more complete subscription message with all required fields
+    const message = {
+      action: isUnsubscribe ? 'unsubscribe' : 'subscribe',
+      // Include type and ticker fields that the server expects
+      type: subject.split('.')[0], // First part of subject (market, signals, etc)
+      subject: subject,
+    };
+
+    // Extract ticker from subject if possible (format: type.subtype.ticker)
+    const parts = subject.split('.');
+    if (parts.length > 1 && parts[0] !== 'system') {
+      message.ticker = parts[parts.length - 1];
+    }
+
+    try {
+      const jsonString = JSON.stringify(message);
+      console.log(`Sending WebSocket ${message.action} request:`, jsonString);
+      socketRef.current.send(jsonString);
+      return true;
+    } catch (error) {
+      console.error('Error sending WebSocket message:', error);
+      return false;
+    }
   };
 
   // Subscribe to a subject
@@ -213,10 +232,19 @@ export const useWebSocketConnection = () => {
     try {
       // Re-fetch the BASE_URL in case it's changed
       const currentUrl = getBaseUrl();
+      
+      // Create WebSocket with proper headers
       const socket = new WebSocket(currentUrl);
+      
+      // Add additional headers through protocol field for debugging
+      // This helps identify what headers are being sent
       socketRef.current = socket;
       
       console.log('Connecting to WebSocket at:', currentUrl);
+      
+      // Log WebSocket readyState for debugging
+      const readyStateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+      console.log(`Initial WebSocket state: ${readyStateNames[socket.readyState]} (${socket.readyState})`);
 
       socket.onopen = () => {
         console.log('WebSocket connected successfully');
