@@ -50,6 +50,7 @@ spec:
               port: 5000
             initialDelaySeconds: 10
             periodSeconds: 30
+            timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             httpGet:
@@ -57,6 +58,7 @@ spec:
               port: 5000
             initialDelaySeconds: 15
             periodSeconds: 60
+            timeoutSeconds: 3
             failureThreshold: 3
 ---
 apiVersion: v1

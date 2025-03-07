@@ -21,19 +21,43 @@ type EventClient struct {
 
 // NewEventClient creates a new client connected to NATS and sets up streams
 func NewEventClient(natsURL string) (*EventClient, error) {
-	// Connect to NATS
+	// Connect to NATS with more robust options
 	nc, err := nats.Connect(natsURL,
 		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(10),
-		nats.ReconnectWait(2*time.Second))
+		nats.MaxReconnects(60),            // Allow more reconnection attempts
+		nats.ReconnectWait(5*time.Second), // Wait longer between reconnects
+		nats.PingInterval(20*time.Second), // More frequent pings to detect disconnects
+		nats.MaxPingsOutstanding(5),       // Allow more pings before considering connection broken
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
+		}),
+		nats.DisconnectHandler(func(nc *nats.Conn) {
+			log.Printf("NATS disconnected: %v", nc.LastError())
+		}),
+		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+			if sub != nil {
+				log.Printf("NATS error on subscription %s: %v", sub.Subject, err)
+			} else {
+				log.Printf("NATS error: %v", err)
+			}
+		}))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	// Create JetStream context
-	js, err := nc.JetStream()
+	// Create JetStream context with retry
+	var js nats.JetStreamContext
+	for i := 0; i < 5; i++ {
+		js, err = nc.JetStream()
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to create JetStream context (attempt %d/5): %v", i+1, err)
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil {
-		return nil, err
+		nc.Close()
+		return nil, fmt.Errorf("failed to create JetStream context after 5 attempts: %w", err)
 	}
 
 	client := &EventClient{
@@ -42,9 +66,18 @@ func NewEventClient(natsURL string) (*EventClient, error) {
 		streams: make(map[string]bool),
 	}
 
-	// Set up all streams
-	if err := client.setupStreams(); err != nil {
-		return nil, err
+	// Set up all streams with retry mechanism
+	for i := 0; i < 3; i++ {
+		err := client.setupStreams()
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to set up streams (attempt %d/3): %v", i+1, err)
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to set up streams after 3 attempts: %w", err)
 	}
 
 	return client, nil

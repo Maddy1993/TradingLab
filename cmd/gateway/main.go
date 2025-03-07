@@ -104,36 +104,46 @@ func (g *APIGateway) setupRoutes() {
 }
 
 func (g *APIGateway) healthHandler(w http.ResponseWriter, r *http.Request) {
-	// Check gRPC connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create a simple request to check if the gRPC service is responsive
-	req := &pb.HistoricalDataRequest{
-		Ticker: "SPY",
-		Days:   1,
-	}
-
-	// Try to get a response
-	_, err := g.tradingClient.GetHistoricalData(ctx, req)
-	grpcStatus := "connected"
-	if err != nil {
-		grpcStatus = fmt.Sprintf("error: %v", err)
-	}
-
-	// Check NATS connection
-	natsStatus := "connected"
-	if g.natsClient == nil {
-		natsStatus = "disconnected"
-	}
-
-	// Respond with health status
+	// Quick health check without making external calls, to meet Kubernetes probes
 	response := map[string]interface{}{
 		"status":       "healthy",
-		"grpc_status":  grpcStatus,
-		"nats_status":  natsStatus,
 		"timestamp":    time.Now().Format(time.RFC3339),
 		"service_name": "tradinglab-api-gateway",
+	}
+
+	// Only perform deep health check for non-probe requests
+	if r.Header.Get("User-Agent") != "kube-probe/1.27" {
+		// Check gRPC connection with longer timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Create a simple request to check if the gRPC service is responsive
+		req := &pb.HistoricalDataRequest{
+			Ticker: "SPY",
+			Days:   1,
+		}
+
+		// Try to get a response
+		_, err := g.tradingClient.GetHistoricalData(ctx, req)
+		grpcStatus := "connected"
+		if err != nil {
+			grpcStatus = fmt.Sprintf("error: %v", err)
+			log.Printf("gRPC health check failed: %v", err)
+		}
+
+		// Check NATS connection
+		natsStatus := "connected"
+		if g.natsClient == nil {
+			natsStatus = "disconnected"
+			log.Printf("NATS connection unavailable")
+		} else if !g.natsClient.GetNATS().IsConnected() {
+			natsStatus = "disconnected"
+			log.Printf("NATS connection lost")
+		}
+
+		response["grpc_status"] = grpcStatus
+		response["nats_status"] = natsStatus
+		response["deep_check"] = true
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -499,11 +509,41 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
 		}
 	}()
 
+	// Message queue with a buffer to handle slow consumers
+	const maxPendingMessages = 100
+	messageQueue := make(chan []byte, maxPendingMessages)
+
+	// Start message sender goroutine - handles backpressure
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-done:
+				return
+			case msg, ok := <-messageQueue:
+				if !ok {
+					return
+				}
+
+				// Try to write with timeout
+				writeTimeout := time.Second * 2
+				conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					log.Printf("Error forwarding message to WebSocket, closing: %v", err)
+					return
+				}
+				conn.SetWriteDeadline(time.Time{}) // Reset deadline
+			}
+		}
+	}()
+
 	for {
 		// Read message
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("Error reading websocket message: %v", err)
+			close(messageQueue) // Signal sender to stop
 			return
 		}
 
@@ -550,18 +590,27 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) {
 				continue
 			}
 
-			// Subscribe to NATS subject
+			// Subscribe to NATS subject with circuit breaker pattern for slow consumers
 			sub, err := g.natsClient.GetNATS().Subscribe(subject, func(msg *nats.Msg) {
-				// Forward message to WebSocket
-				if err := conn.WriteMessage(websocket.TextMessage, msg.Data); err != nil {
-					log.Printf("Error forwarding NATS message to WebSocket: %v", err)
-					return
+				// Use non-blocking send to message queue
+				select {
+				case messageQueue <- msg.Data:
+					// Message sent to queue
+				default:
+					// Queue full, discard message but keep connection alive
+					log.Printf("WebSocket message queue full for %s, discarding message", subject)
 				}
 			})
 
 			if err != nil {
 				log.Printf("Error subscribing to NATS subject %s: %v", subject, err)
 				continue
+			}
+
+			// Set pending limits to avoid overwhelming NATS with slow consumers
+			// This sets how many messages/bytes can be pending before NATS drops them
+			if err := sub.SetPendingLimits(256, 1024*1024); err != nil {
+				log.Printf("Error setting pending limits: %v", err)
 			}
 
 			// Store subscription
@@ -630,25 +679,41 @@ func (g *APIGateway) Serve(addr string) error {
 
 	// Set up graceful shutdown
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	// Listen for more signals including SIGKILL and SIGQUIT
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-quit
 
 	// Shutdown server
 	log.Println("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown failed: %w", err)
+
+	// Close all WebSocket connections first to avoid hanging
+	g.wsClientsMutex.Lock()
+	for conn := range g.wsClients {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Server shutting down"))
+		conn.Close()
+		delete(g.wsClients, conn)
+	}
+	g.wsClientsMutex.Unlock()
+
+	// Close NATS client before closing HTTP server to avoid hanging NATS subscriptions
+	if g.natsClient != nil {
+		log.Println("Closing NATS connection...")
+		g.natsClient.Close()
 	}
 
 	// Close gRPC connection
 	if g.tradingConn != nil {
+		log.Println("Closing gRPC connection...")
 		g.tradingConn.Close()
 	}
 
-	// Close NATS client
-	if g.natsClient != nil {
-		g.natsClient.Close()
+	// Now shutdown the HTTP server
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Increased timeout
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
 	log.Println("Server gracefully stopped")
