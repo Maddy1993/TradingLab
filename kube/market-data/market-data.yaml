@@ -45,7 +45,9 @@ spec:
             - name: POLLING_INTERVAL
               value: "60s"
             - name: WATCH_TICKERS
-              value: "SPY,AAPL,MSFT,GOOGL,AMZN"
+              value: "QQQ"
+            - name: ALPACA_DATA_FEED
+              value: "IEX"
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
