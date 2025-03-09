@@ -1,7 +1,7 @@
 # TradingLab Makefile
 # Variables
 PROJECT_NAME := tradinglab
-REGISTRY := us-central1-docker.pkg.dev/financetracker-451021/tradinglab
+REGISTRY := localhost:5000
 VERSION := $(shell git describe --tags --always --dirty || echo "dev")
 NATS_VERSION := 2.9.15
 

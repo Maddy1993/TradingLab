@@ -107,6 +107,13 @@ func main() {
 		usePaperTrading = false
 	}
 
+	// Log the data feed we'll be using
+	dataFeed := os.Getenv("ALPACA_DATA_FEED")
+	if dataFeed == "" {
+		dataFeed = "IEX (default)"
+	}
+	log.Printf("Using Alpaca data feed: %s", dataFeed)
+
 	// Create market data provider
 	marketProvider, err = market.NewAlpacaProvider(apiKey, apiSecret, usePaperTrading)
 	if err != nil {

@@ -14,8 +14,6 @@ spec:
       labels:
         app: market-data-service
     spec:
-      imagePullSecrets:
-        - name: gcr-json-key
       containers:
         - name: market-data-service
           image: ${REGISTRY}/market-data-service:${VERSION}
@@ -45,7 +43,9 @@ spec:
             - name: POLLING_INTERVAL
               value: "60s"
             - name: WATCH_TICKERS
-              value: "SPY,AAPL,MSFT,GOOGL,AMZN"
+              value: "QQQ"
+            - name: ALPACA_DATA_FEED
+              value: "IEX"
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:

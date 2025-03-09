@@ -169,8 +169,13 @@ func (c *EventClient) RequestHistoricalData(ctx context.Context, ticker, timefra
 		return err
 	}
 
-	_, err = c.js.Publish(subject, payload)
-	return err
+	// Publish to the REQUESTS stream with explicit stream binding
+	_, err = c.js.Publish(subject, payload, nats.ExpectStream(StreamRequests))
+	if err != nil {
+		return fmt.Errorf("failed to publish historical request: %w", err)
+	}
+
+	return nil
 }
 
 // SubscribeMarketLiveData subscribes to live market data for a ticker
@@ -194,10 +199,21 @@ func (c *EventClient) SubscribeMarketDailyData(ticker string, handler func([]byt
 // SubscribeHistoricalData subscribes to historical data for specific parameters
 func (c *EventClient) SubscribeHistoricalData(ticker, timeframe string, days int, handler func([]byte)) (*nats.Subscription, error) {
 	subject := fmt.Sprintf(SubjectMarketHistoricalData, ticker, timeframe, days)
+
+	// Create a unique consumer name
+	consumerName := fmt.Sprintf("historical-consumer-%s-%s-%d-%d",
+		ticker, timeframe, days, time.Now().Unix())
+
+	// Use more robust subscription options
 	return c.js.Subscribe(subject, func(msg *nats.Msg) {
 		handler(msg.Data)
 		msg.Ack()
-	}, nats.DeliverAll())
+	},
+		nats.DeliverAll(),
+		nats.AckExplicit(),
+		nats.Durable(consumerName),
+		nats.ManualAck(),
+		nats.BindStream(StreamMarketHistorical))
 }
 
 // SubscribeHistoricalRequests subscribes to historical data requests
@@ -215,7 +231,7 @@ func (c *EventClient) SubscribeHistoricalRequests(handler func(string, string, i
 			handler(ticker, timeframe, days, msg.Data)
 			msg.Ack()
 		}
-	}, nats.DeliverAll())
+	}, nats.DeliverAll(), nats.BindStream(StreamRequests))
 }
 
 // PublishSignal publishes a trading signal

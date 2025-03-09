@@ -32,7 +32,7 @@ const (
 	// Format: market.historical.{ticker}.{timeframe}.{days}
 	SubjectMarketHistoricalRequest = "market.historical.request.%s.%s.%d" // ticker, timeframe, days
 	SubjectMarketHistoricalData    = "market.historical.data.%s.%s.%d"    // ticker, timeframe, days
-	SubjectMarketHistoricalAll     = "market.historical.data.*"           // All historical data
+	SubjectMarketHistoricalAll     = "market.historical.data.>"           // All historical data (use > for multi-level wildcard)
 
 	// Subject patterns for signals
 	SubjectSignalsTicker = "signals.%s" // e.g., signals.AAPL
@@ -107,7 +107,7 @@ func GetStreamConfigs() []StreamConfig {
 		},
 		{
 			Name:      StreamRequests,
-			Subjects:  []string{"requests.*"},
+			Subjects:  []string{"requests.>"},
 			MaxAge:    1 * 60 * 60 * 1e9, // 1 hour in nanoseconds
 			Storage:   nats.MemoryStorage,
 			Replicas:  1,

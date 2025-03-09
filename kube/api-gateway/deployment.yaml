@@ -13,8 +13,8 @@ spec:
       labels:
         app: api-gateway
     spec:
-      imagePullSecrets:
-        - name: gcr-json-key
+#      imagePullSecrets:
+#        - name: gcr-json-key
       containers:
         - name: api-gateway
           image: ${REGISTRY}/api-gateway:${VERSION}
