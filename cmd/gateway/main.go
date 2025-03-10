@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/myapp/tradinglab/pkg/events"
+	"github.com/myapp/tradinglab/pkg/utils"
 	pb "github.com/myapp/tradinglab/proto"
 )
 
@@ -65,21 +65,21 @@ func NewAPIGateway(natsURL, tradingServiceURL string) (*APIGateway, error) {
 	var connErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		log.Printf("Connecting to trading service at %s (attempt %d/%d)", tradingServiceURL, attempt, maxRetries)
+		utils.Info("Connecting to trading service at %s (attempt %d/%d)", tradingServiceURL, attempt, maxRetries)
 		tradingConn, connErr = grpc.Dial(tradingServiceURL, opts...)
 
 		if connErr == nil {
 			tradingClient = pb.NewTradingServiceClient(tradingConn)
-			log.Printf("Successfully connected to trading service")
+			utils.Info("Successfully connected to trading service")
 			break
 		}
 
-		log.Printf("Failed to connect to trading service (attempt %d/%d): %v", attempt, maxRetries, connErr)
+		utils.Info("Failed to connect to trading service (attempt %d/%d): %v", attempt, maxRetries, connErr)
 
 		if attempt < maxRetries {
 			// Exponential backoff
 			waitTime := backoffTime * time.Duration(attempt)
-			log.Printf("Retrying in %v", waitTime)
+			utils.Info("Retrying in %v", waitTime)
 			time.Sleep(waitTime)
 		}
 	}
@@ -203,18 +203,18 @@ func (g *APIGateway) healthHandler(w http.ResponseWriter, r *http.Request) {
 		// Check if connections exist at a basic level
 		if g.tradingConn == nil {
 			grpcStatus = "disconnected"
-			log.Printf("gRPC connection is nil")
+			utils.Info("gRPC connection is nil")
 		} else if g.tradingConn.GetState().String() != "READY" {
 			grpcStatus = fmt.Sprintf("not ready: %s", g.tradingConn.GetState().String())
-			log.Printf("gRPC connection not ready: %s", g.tradingConn.GetState().String())
+			utils.Info("gRPC connection not ready: %s", g.tradingConn.GetState().String())
 		}
 
 		if g.natsClient == nil {
 			natsStatus = "disconnected"
-			log.Printf("NATS connection unavailable")
+			utils.Info("NATS connection unavailable")
 		} else if !g.natsClient.GetNATS().IsConnected() {
 			natsStatus = "disconnected"
-			log.Printf("NATS connection lost")
+			utils.Info("NATS connection lost")
 		}
 
 		response["grpc_status"] = grpcStatus
@@ -284,7 +284,7 @@ func (g *APIGateway) historicalDataHandler(w http.ResponseWriter, r *http.Reques
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			log.Printf("Retrying historical data request for %s (attempt %d/%d)", ticker, attempt, maxRetries)
+			utils.Info("Retrying historical data request for %s (attempt %d/%d)", ticker, attempt, maxRetries)
 			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
 		}
 
@@ -293,7 +293,7 @@ func (g *APIGateway) historicalDataHandler(w http.ResponseWriter, r *http.Reques
 			break // Success, exit retry loop
 		}
 
-		log.Printf("Historical data request failed (attempt %d/%d): %v", attempt, maxRetries, err)
+		utils.Info("Historical data request failed (attempt %d/%d): %v", attempt, maxRetries, err)
 		systemFailures++
 
 		if attempt == maxRetries || ctx.Err() != nil {
@@ -331,7 +331,7 @@ func (g *APIGateway) historicalDataHandler(w http.ResponseWriter, r *http.Reques
 	// All retries failed, try to use cached data
 	cachedData, exists := g.cache.GetCachedHistoricalData(cacheKey)
 	if exists {
-		log.Printf("Using cached historical data for %s (%.1f minutes old)",
+		utils.Info("Using cached historical data for %s (%.1f minutes old)",
 			ticker, time.Since(cachedData.Timestamp).Minutes())
 
 		// Add headers to indicate cache usage
@@ -409,7 +409,7 @@ func (c *DataCache) updateServiceStatus(failedSystem string, failureCount int) {
 	// If status changed, update timestamp
 	if oldMode != c.serviceMode {
 		c.lastStatusChange = time.Now()
-		log.Printf("Service status changed to %s: %s", c.serviceMode, c.statusDescription)
+		utils.Info("Service status changed to %s: %s", c.serviceMode, c.statusDescription)
 	}
 }
 
@@ -626,7 +626,7 @@ func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			log.Printf("Retrying signal generation for %s (attempt %d/%d)", ticker, attempt, maxRetries)
+			utils.Info("Retrying signal generation for %s (attempt %d/%d)", ticker, attempt, maxRetries)
 			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
 		}
 
@@ -635,7 +635,7 @@ func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
 			break // Success, exit retry loop
 		}
 
-		log.Printf("Signal generation failed (attempt %d/%d): %v", attempt, maxRetries, err)
+		utils.Info("Signal generation failed (attempt %d/%d): %v", attempt, maxRetries, err)
 		systemFailures++
 
 		if attempt == maxRetries || ctx.Err() != nil {
@@ -671,7 +671,7 @@ func (g *APIGateway) signalsHandler(w http.ResponseWriter, r *http.Request) {
 	// All retries failed, try to use cached data
 	cachedData, exists := g.cache.GetCachedSignalData(cacheKey)
 	if exists {
-		log.Printf("Using cached signal data for %s (%.1f minutes old)",
+		utils.Info("Using cached signal data for %s (%.1f minutes old)",
 			ticker, time.Since(cachedData.Timestamp).Minutes())
 
 		// Add headers to indicate cache usage
@@ -872,20 +872,20 @@ func (g *APIGateway) recommendationsHandler(w http.ResponseWriter, r *http.Reque
 
 func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	// Log headers for debugging
-	log.Printf("WebSocket request headers: %+v", r.Header)
+	utils.Info("WebSocket request headers: %+v", r.Header)
 
 	// Make sure we have the required headers for WebSocket upgrade
 	upgradeHeader := r.Header.Get("Upgrade")
 	connectionHeader := r.Header.Get("Connection")
 
 	if !strings.Contains(strings.ToLower(upgradeHeader), "websocket") {
-		log.Printf("Missing 'websocket' in Upgrade header: %s", upgradeHeader)
+		utils.Info("Missing 'websocket' in Upgrade header: %s", upgradeHeader)
 		http.Error(w, "WebSocket upgrade required", http.StatusBadRequest)
 		return
 	}
 
 	if !strings.Contains(strings.ToLower(connectionHeader), "upgrade") {
-		log.Printf("Missing 'upgrade' in Connection header: %s", connectionHeader)
+		utils.Info("Missing 'upgrade' in Connection header: %s", connectionHeader)
 		http.Error(w, "WebSocket upgrade required", http.StatusBadRequest)
 		return
 	}
@@ -903,12 +903,12 @@ func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade to websocket: %v", err)
+		utils.Info("Failed to upgrade to websocket: %v", err)
 		return
 	}
 	defer conn.Close()
 
-	log.Printf("WebSocket connection established successfully")
+	utils.Info("WebSocket connection established successfully")
 
 	// Register client
 	g.wsClientsMutex.Lock()
@@ -920,7 +920,7 @@ func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		g.wsClientsMutex.Lock()
 		delete(g.wsClients, conn)
 		g.wsClientsMutex.Unlock()
-		log.Printf("WebSocket connection closed")
+		utils.Info("WebSocket connection closed")
 	}()
 
 	// Handle WebSocket messages (for subscription requests)
@@ -941,7 +941,7 @@ func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn.SetPongHandler(func(data string) error {
 		// When we receive a pong, log it for debugging
-		log.Printf("Received pong from WebSocket client")
+		utils.Info("Received pong from WebSocket client")
 		return nil
 	})
 
@@ -949,14 +949,14 @@ func (g *APIGateway) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case err := <-messageHandler:
-			log.Printf("WebSocket message handler returned: %v", err)
+			utils.Info("WebSocket message handler returned: %v", err)
 			return
 		case <-pingTicker.C:
 			// Send ping to client
 			pingData := []byte(fmt.Sprintf("ping-%d", time.Now().Unix()))
 			err := conn.WriteControl(websocket.PingMessage, pingData, time.Now().Add(5*time.Second))
 			if err != nil {
-				log.Printf("WebSocket ping failed: %v", err)
+				utils.Info("WebSocket ping failed: %v", err)
 				return
 			}
 		}
@@ -969,9 +969,9 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 	defer func() {
 		// Clean up subscriptions when connection closes
 		for subject, sub := range subscriptions {
-			log.Printf("Cleaning up subscription to %s", subject)
+			utils.Info("Cleaning up subscription to %s", subject)
 			if err := sub.Unsubscribe(); err != nil {
-				log.Printf("Error unsubscribing from %s: %v", subject, err)
+				utils.Info("Error unsubscribing from %s: %v", subject, err)
 			}
 		}
 	}()
@@ -999,7 +999,7 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 				writeTimeout := time.Second * 5 // Increased timeout
 				conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					log.Printf("Error forwarding message to WebSocket, closing: %v", err)
+					utils.Info("Error forwarding message to WebSocket, closing: %v", err)
 					senderErrors <- err
 					return
 				}
@@ -1027,9 +1027,9 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 				websocket.CloseGoingAway,
 				websocket.CloseNormalClosure,
 				websocket.CloseNoStatusReceived) {
-				log.Printf("Unexpected WebSocket close: %v", err)
+				utils.Info("Unexpected WebSocket close: %v", err)
 			} else {
-				log.Printf("WebSocket closed: %v", err)
+				utils.Info("WebSocket closed: %v", err)
 			}
 			close(messageQueue) // Signal sender to stop
 			return err
@@ -1040,11 +1040,11 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 
 		// Only process text messages
 		if messageType != websocket.TextMessage {
-			log.Printf("Ignoring non-text message type: %d", messageType)
+			utils.Info("Ignoring non-text message type: %d", messageType)
 			continue
 		}
 
-		log.Printf("Received WebSocket message: %s", string(p))
+		utils.Info("Received WebSocket message: %s", string(p))
 
 		// Parse subscription request
 		var request struct {
@@ -1055,7 +1055,7 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 		}
 
 		if err := json.Unmarshal(p, &request); err != nil {
-			log.Printf("Error parsing subscription request: %v, message: %s", err, string(p))
+			utils.Info("Error parsing subscription request: %v, message: %s", err, string(p))
 			// Send error message back to client
 			errorMsg := map[string]string{
 				"error": fmt.Sprintf("Invalid message format: %v", err),
@@ -1098,19 +1098,19 @@ func (g *APIGateway) handleWebSocketMessages(conn *websocket.Conn) error {
 					// Message sent to queue
 				default:
 					// Queue full, discard message but keep connection alive
-					log.Printf("WebSocket message queue full for %s, discarding message", subject)
+					utils.Info("WebSocket message queue full for %s, discarding message", subject)
 				}
 			})
 
 			if err != nil {
-				log.Printf("Error subscribing to NATS subject %s: %v", subject, err)
+				utils.Info("Error subscribing to NATS subject %s: %v", subject, err)
 				continue
 			}
 
 			// Set pending limits to avoid overwhelming NATS with slow consumers
 			// This sets how many messages/bytes can be pending before NATS drops them
 			if err := sub.SetPendingLimits(256, 1024*1024); err != nil {
-				log.Printf("Error setting pending limits: %v", err)
+				utils.Info("Error setting pending limits: %v", err)
 			}
 
 			// Store subscription
@@ -1171,9 +1171,9 @@ func (g *APIGateway) Serve(addr string) error {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("API Gateway listening on %s", addr)
+		utils.Info("API Gateway listening on %s", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			utils.Fatal("Server error: %v", err)
 		}
 	}()
 
@@ -1184,7 +1184,7 @@ func (g *APIGateway) Serve(addr string) error {
 	<-quit
 
 	// Shutdown server
-	log.Println("Shutting down server...")
+	utils.Info("Shutting down server...")
 
 	// Close all WebSocket connections first to avoid hanging
 	g.wsClientsMutex.Lock()
@@ -1197,13 +1197,13 @@ func (g *APIGateway) Serve(addr string) error {
 
 	// Close NATS client before closing HTTP server to avoid hanging NATS subscriptions
 	if g.natsClient != nil {
-		log.Println("Closing NATS connection...")
+		utils.Info("Closing NATS connection...")
 		g.natsClient.Close()
 	}
 
 	// Close gRPC connection
 	if g.tradingConn != nil {
-		log.Println("Closing gRPC connection...")
+		utils.Info("Closing gRPC connection...")
 		g.tradingConn.Close()
 	}
 
@@ -1212,11 +1212,11 @@ func (g *APIGateway) Serve(addr string) error {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("HTTP server shutdown error: %v", err)
+		utils.Info("HTTP server shutdown error: %v", err)
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
-	log.Println("Server gracefully stopped")
+	utils.Info("Server gracefully stopped")
 	return nil
 }
 
@@ -1240,7 +1240,7 @@ func main() {
 	// Create API Gateway
 	gateway, err := NewAPIGateway(natsURL, tradingServiceURL)
 	if err != nil {
-		log.Fatalf("Failed to create API Gateway: %v", err)
+		utils.Fatal("Failed to create API Gateway: %v", err)
 	}
 
 	// Set up routes
@@ -1248,6 +1248,6 @@ func main() {
 
 	// Start server
 	if err := gateway.Serve(addr); err != nil {
-		log.Fatalf("Server error: %v", err)
+		utils.Fatal("Server error: %v", err)
 	}
 }

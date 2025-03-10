@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/nats-io/nats.go v1.39.1
+	github.com/sirupsen/logrus v1.9.3
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.4
 )

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/myapp/tradinglab/pkg/events"
+	"github.com/myapp/tradinglab/pkg/utils"
 	eventhub "github.com/myapp/tradinglab/pkg/hub"
 )
 
@@ -21,11 +21,10 @@ func init() {
 	// Set timezone to ET (Eastern Time) for market hours
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		log.Printf("Failed to load ET timezone: %v", err)
+		utils.Error("Failed to load ET timezone: %v", err)
 	} else {
 		time.Local = loc
 	}
-	log.SetFlags(log.LstdFlags | log.LUTC)
 }
 
 func main() {
@@ -51,13 +50,13 @@ func main() {
 		tickers = []string{"SPY", "AAPL", "MSFT", "GOOGL", "AMZN"}
 	}
 
-	log.Printf("Event Hub starting, connecting to NATS server at %s", natsURL)
-	log.Printf("Watching tickers: %v", tickers)
+	utils.Info("Event Hub starting, connecting to NATS server at %s", natsURL)
+	utils.Info("Watching tickers: %v", tickers)
 
 	// Create event client
 	client, err := events.NewEventClient(natsURL)
 	if err != nil {
-		log.Fatalf("Failed to create event client: %v", err)
+		utils.Fatal("Failed to create event client: %v", err)
 	}
 	defer client.Close()
 
@@ -71,7 +70,7 @@ func main() {
 
 	go func() {
 		sig := <-signals
-		log.Printf("Received signal: %v", sig)
+		utils.Info("Received signal: %v", sig)
 		cancel()
 	}()
 
@@ -92,15 +91,15 @@ func main() {
 
 		// If no error or only non-critical errors, we can proceed
 		if err == nil {
-			log.Printf("Event hub started successfully with all streams")
+			utils.Info("Event hub started successfully with all streams")
 			break
 		} else if !strings.Contains(err.Error(), "failed to start critical components") {
 			// We had errors but none for critical components
-			log.Printf("Event hub started with some non-critical streams unavailable")
+			utils.Info("Event hub started with some non-critical streams unavailable")
 			break
 		}
 
-		log.Printf("Attempt %d/%d: Required critical streams not yet available, waiting for services to initialize: %v",
+		utils.Info("Attempt %d/%d: Required critical streams not yet available, waiting for services to initialize: %v",
 			i+1, maxRetries, err)
 		select {
 		case <-ctx.Done():
@@ -113,7 +112,7 @@ func main() {
 	// Even if we couldn't start critical components after all retries,
 	// just log the warning and continue - the retry mechanism will keep trying
 	if lastError != nil && strings.Contains(lastError.Error(), "failed to start critical components") {
-		log.Printf("Warning: Starting event hub with critical components unavailable. " +
+		utils.Info("Warning: Starting event hub with critical components unavailable. " +
 			"Will continue to retry in the background.")
 	}
 
@@ -205,16 +204,16 @@ func main() {
 
 	// Start HTTP server in a goroutine
 	go func() {
-		log.Printf("Starting HTTP server on %s", healthAddr)
+		utils.Info("Starting HTTP server on %s", healthAddr)
 		if err := http.ListenAndServe(healthAddr, nil); err != nil {
-			log.Fatalf("HTTP server error: %v", err)
+			utils.Fatal("HTTP server error: %v", err)
 		}
 	}()
 
 	// Keep running until signal received
-	log.Println("Event Hub running. Press Ctrl+C to exit")
+	utils.Info("Event Hub running. Press Ctrl+C to exit")
 	<-ctx.Done()
-	log.Println("Shutting down Event Hub")
+	utils.Info("Shutting down Event Hub")
 
 	// Allow time for clean shutdown
 	time.Sleep(500 * time.Millisecond)

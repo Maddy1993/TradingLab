@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/myapp/tradinglab/pkg/utils"
 	"github.com/nats-io/nats.go"
 )
 
@@ -29,16 +29,16 @@ func NewEventClient(natsURL string) (*EventClient, error) {
 		nats.PingInterval(20*time.Second), // More frequent pings to detect disconnects
 		nats.MaxPingsOutstanding(5),       // Allow more pings before considering connection broken
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
+			utils.Info("NATS reconnected to %s", nc.ConnectedUrl())
 		}),
 		nats.DisconnectHandler(func(nc *nats.Conn) {
-			log.Printf("NATS disconnected: %v", nc.LastError())
+			utils.Warn("NATS disconnected: %v", nc.LastError())
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
 			if sub != nil {
-				log.Printf("NATS error on subscription %s: %v", sub.Subject, err)
+				utils.Error("NATS error on subscription %s: %v", sub.Subject, err)
 			} else {
-				log.Printf("NATS error: %v", err)
+				utils.Error("NATS error: %v", err)
 			}
 		}))
 	if err != nil {
@@ -52,7 +52,7 @@ func NewEventClient(natsURL string) (*EventClient, error) {
 		if err == nil {
 			break
 		}
-		log.Printf("Failed to create JetStream context (attempt %d/5): %v", i+1, err)
+		utils.Warn("Failed to create JetStream context (attempt %d/5): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
 	if err != nil {
@@ -72,7 +72,7 @@ func NewEventClient(natsURL string) (*EventClient, error) {
 		if err == nil {
 			break
 		}
-		log.Printf("Failed to set up streams (attempt %d/3): %v", i+1, err)
+		utils.Warn("Failed to set up streams (attempt %d/3): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
 	if err != nil {
@@ -114,12 +114,12 @@ func (c *EventClient) createOrUpdateStream(cfg StreamConfig) error {
 			if err != nil {
 				return err
 			}
-			log.Printf("Updated existing stream: %s", cfg.Name)
+			utils.Info("Updated existing stream: %s", cfg.Name)
 		} else {
 			return err
 		}
 	} else {
-		log.Printf("Created new stream: %s", cfg.Name)
+		utils.Info("Created new stream: %s", cfg.Name)
 	}
 
 	return nil

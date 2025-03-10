@@ -4,13 +4,13 @@ package market
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/alpacahq/alpaca-trade-api-go/v3/alpaca"
 	"github.com/alpacahq/alpaca-trade-api-go/v3/marketdata"
+	"github.com/myapp/tradinglab/pkg/utils"
 )
 
 // AlpacaProvider implements market data fetching from Alpaca API
@@ -20,23 +20,6 @@ type AlpacaProvider struct {
 	paperTrading     bool
 	dataFeed         marketdata.Feed        // Data feed to use (IEX, SIP)
 	lastValidData    map[string]*MarketData // Cache last valid data by ticker
-}
-
-// MarketData represents OHLCV market data
-type MarketData struct {
-	Ticker     string    `json:"ticker"`
-	Timestamp  time.Time `json:"timestamp"`
-	Price      float64   `json:"price"`
-	Open       float64   `json:"open"`
-	High       float64   `json:"high"`
-	Low        float64   `json:"low"`
-	Close      float64   `json:"close"`
-	Volume     int64     `json:"volume"`
-	VWAP       float64   `json:"vwap,omitempty"`
-	TradeCount int       `json:"trade_count,omitempty"`
-	Interval   string    `json:"interval"`
-	Source     string    `json:"source"`
-	DataType   string    `json:"data_type,omitempty"` // "live", "daily", "historical", "recent"
 }
 
 // NewAlpacaProvider creates a new Alpaca data provider using the official SDK
@@ -69,10 +52,10 @@ func NewAlpacaProvider(apiKey, apiSecret string, paperTrading bool) (*AlpacaProv
 		case "IEX":
 			dataFeed = marketdata.IEX
 		default:
-			log.Printf("Warning: Unknown ALPACA_DATA_FEED value '%s', using default (IEX)", feedEnv)
+			utils.Warn("Unknown ALPACA_DATA_FEED value '%s', using default (IEX)", feedEnv)
 		}
 	}
-	log.Printf("Using Alpaca data feed: %s", dataFeed)
+	utils.Info("Using Alpaca data feed: %s", dataFeed)
 
 	return &AlpacaProvider{
 		alpacaClient:     alpacaClient,
@@ -85,26 +68,60 @@ func NewAlpacaProvider(apiKey, apiSecret string, paperTrading bool) (*AlpacaProv
 
 // IsMarketOpen checks if the market is currently open
 func (p *AlpacaProvider) IsMarketOpen(ctx context.Context) (bool, error) {
+	utils.Debug("Making request to Alpaca API to get market clock")
+
 	// Use the Alpaca SDK to get the market clock
 	clock, err := p.alpacaClient.GetClock()
 	if err != nil {
+		// Check for 401 unauthorized error
+		if strings.Contains(err.Error(), "request is not authorized") ||
+			strings.Contains(err.Error(), "HTTP 401") {
+			utils.Debug("Alpaca API authentication failed: %v", err)
+			utils.Warn("Authentication failure when checking market status. This may be due to invalid API keys or expired credentials")
+
+			// Set fallback value based on current time (Eastern Time)
+			loc, _ := time.LoadLocation("America/New_York")
+			now := time.Now().In(loc)
+
+			// Regular market hours are 9:30 AM - 4:00 PM ET, Mon-Fri
+			hour, min, sec := now.Clock()
+			marketTime := hour*3600 + min*60 + sec
+
+			// Check if current time is within market hours (9:30 AM - 4:00 PM ET)
+			isWithinHours := marketTime >= 9*3600+30*60 && marketTime < 16*3600
+
+			// Check if it's a weekday (Monday = 1, Sunday = 0)
+			isWeekday := now.Weekday() > 0 && now.Weekday() < 6
+
+			isOpen := isWithinHours && isWeekday
+			utils.Info("Using fallback market hours calculation: market is %s",
+				map[bool]string{true: "OPEN", false: "CLOSED"}[isOpen])
+
+			return isOpen, nil // Don't return error to allow the system to continue functioning
+		}
+
+		utils.Error("Error getting market clock: %v", err)
 		return false, fmt.Errorf("failed to get market clock: %w", err)
 	}
 
+	utils.Debug("Received response from Alpaca API: Market is %s",
+		map[bool]string{true: "OPEN", false: "CLOSED"}[clock.IsOpen])
 	return clock.IsOpen, nil
 }
 
 // GetLatestData fetches real-time market data for a ticker
 func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*MarketData, error) {
+	utils.Debug("Fetching latest data for ticker %s", ticker)
+
 	// Check if market is open
 	isOpen, err := p.IsMarketOpen(ctx)
 	if err != nil {
-		log.Printf("Failed to check market status: %v", err)
+		utils.Warn("Failed to check market status: %v", err)
 		// Proceed with the attempt even if we can't check market status
 	}
 
 	if !isOpen {
-		log.Printf("Market is closed, using most recent data for %s", ticker)
+		utils.Info("Market is closed, using most recent data for %s", ticker)
 		return p.GetMostRecentData(ctx, ticker)
 	}
 
@@ -112,16 +129,21 @@ func (p *AlpacaProvider) GetLatestData(ctx context.Context, ticker string) (*Mar
 	request := marketdata.GetLatestQuoteRequest{
 		Feed: p.dataFeed,
 	}
+
+	utils.Debug("Making request to Alpaca API for latest quote for %s using %s feed", ticker, p.dataFeed)
 	quote, err := p.marketDataClient.GetLatestQuote(ticker, request)
 	if err != nil {
-		log.Printf("Failed to get latest quote for %s: %v, falling back to bars", ticker, err)
+		utils.Debug("Error getting latest quote for %s: %v", ticker, err)
+		utils.Warn("Failed to get latest quote for %s: %v, falling back to bars", ticker, err)
 		return p.GetMostRecentData(ctx, ticker)
 	}
+
+	utils.Debug("Received quote response for %s: bid=%.2f, ask=%.2f", ticker, quote.BidPrice, quote.AskPrice)
 
 	// Get the latest 1-minute bar to complete OHLC data
 	bar, err := p.getLatestMinuteBar(ctx, ticker)
 	if err != nil {
-		log.Printf("Failed to get latest minute bar: %v", err)
+		utils.Warn("Failed to get latest minute bar: %v", err)
 		// If we can't get the bar, use the quote data to create a partial record
 
 		// Calculate mid price from quote
@@ -217,7 +239,7 @@ func (p *AlpacaProvider) GetMostRecentData(ctx context.Context, ticker string) (
 	}
 
 	// If that fails, try to get the latest daily bar
-	log.Printf("Failed to get latest minute bar for %s: %v, trying daily bar", ticker, err)
+	utils.Debug("Failed to get latest minute bar for %s: %v, trying daily bar", ticker, err)
 
 	// Get the most recent daily bar
 	dailyBar, err := p.getLatestDailyBar(ctx, ticker)
@@ -250,7 +272,7 @@ func (p *AlpacaProvider) GetMostRecentData(ctx context.Context, ticker string) (
 
 	// If all else fails, check if we have cached data
 	if cachedData, ok := p.lastValidData[ticker]; ok {
-		log.Printf("Using cached data for %s", ticker)
+		utils.Info("Using cached data for %s", ticker)
 		// Return a copy with updated timestamp
 		dataCopy := *cachedData
 		dataCopy.Timestamp = time.Now()
@@ -259,7 +281,7 @@ func (p *AlpacaProvider) GetMostRecentData(ctx context.Context, ticker string) (
 	}
 
 	// Last resort: generate sample data
-	log.Printf("No data available for %s, generating sample data", ticker)
+	utils.Warn("No data available for %s, generating sample data", ticker)
 	return p.generateSampleData(ticker), nil
 }
 
@@ -297,9 +319,12 @@ func (p *AlpacaProvider) GetDailyData(ctx context.Context, ticker string) (*Mark
 
 // GetHistoricalData fetches historical data for a ticker with specified parameters
 func (p *AlpacaProvider) GetHistoricalData(ctx context.Context, ticker string, days int, timeframe string) ([]*MarketData, error) {
+	utils.Debug("Fetching historical data for %s, %d days, timeframe %s", ticker, days, timeframe)
+
 	// Convert timeframe to Alpaca format
 	alpacaTimeframe, err := convertToAlpacaTimeframe(timeframe)
 	if err != nil {
+		utils.Error("Invalid timeframe format: %s - %v", timeframe, err)
 		return nil, err
 	}
 
@@ -307,6 +332,7 @@ func (p *AlpacaProvider) GetHistoricalData(ctx context.Context, ticker string, d
 	now := time.Now()
 	end := now
 	start := now.AddDate(0, 0, -days)
+	utils.Debug("Historical data period: %s to %s", start.Format(time.RFC3339), end.Format(time.RFC3339))
 
 	// Get bars using the SDK
 	barsRequest := marketdata.GetBarsRequest{
@@ -318,10 +344,14 @@ func (p *AlpacaProvider) GetHistoricalData(ctx context.Context, ticker string, d
 	}
 
 	// Get bars for the requested symbol
+	utils.Debug("Making request to Alpaca API for historical bars for %s", ticker)
 	bars, err := p.marketDataClient.GetBars(ticker, barsRequest)
 	if err != nil {
+		utils.Error("Failed to get historical bars for %s: %v", ticker, err)
 		return nil, fmt.Errorf("failed to get historical bars: %w", err)
 	}
+
+	utils.Debug("Received %d historical bars for %s", len(bars), ticker)
 
 	// Convert to MarketData array
 	data := make([]*MarketData, 0, len(bars))

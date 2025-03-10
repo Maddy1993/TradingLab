@@ -2,9 +2,10 @@ package hub
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
+	
+	"github.com/myapp/tradinglab/pkg/utils"
 )
 
 // HealthResponse represents the health check response
@@ -34,11 +35,11 @@ func (h *EventHub) StartHealthServer(addr string) error {
 		w.WriteHeader(http.StatusOK)
 
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding health response: %v", err)
+			utils.Error("Error encoding health response: %v", err)
 		}
 	})
 
 	// Start HTTP server
-	log.Printf("Starting health server on %s", addr)
+	utils.Info("Starting health server on %s", addr)
 	return http.ListenAndServe(addr, mux)
 }

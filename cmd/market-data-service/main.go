@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/myapp/tradinglab/pkg/events"
 	"github.com/myapp/tradinglab/pkg/market"
+	"github.com/myapp/tradinglab/pkg/utils"
 )
 
 // ServiceStatus contains information about the service status
@@ -48,11 +48,10 @@ func init() {
 	// Set timezone to ET (Eastern Time) for market hours
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		log.Printf("Failed to load ET timezone: %v", err)
+		utils.Error("Failed to load ET timezone: %v", err)
 	} else {
 		time.Local = loc
 	}
-	log.SetFlags(log.LstdFlags | log.LUTC)
 }
 
 func main() {
@@ -68,13 +67,13 @@ func main() {
 		httpPort = "8080"
 	}
 
-	log.Printf("Market Data Service starting, connecting to NATS server at %s", natsURL)
+	utils.Info("Market Data Service starting, connecting to NATS server at %s", natsURL)
 
 	// Create event client
 	var err error
 	eventClient, err = events.NewEventClient(natsURL)
 	if err != nil {
-		log.Fatalf("Failed to create event client: %v", err)
+		utils.Fatal("Failed to create event client: %v", err)
 	}
 	defer eventClient.Close()
 
@@ -88,7 +87,7 @@ func main() {
 
 	go func() {
 		sig := <-signals
-		log.Printf("Received signal: %v", sig)
+		utils.Info("Received signal: %v", sig)
 		cancel()
 	}()
 
@@ -98,7 +97,7 @@ func main() {
 
 	// Check if credentials are provided
 	if apiKey == "" || apiSecret == "" {
-		log.Fatalf("ALPACA_API_KEY and ALPACA_API_SECRET environment variables are required")
+		utils.Fatal("ALPACA_API_KEY and ALPACA_API_SECRET environment variables are required")
 	}
 
 	// Determine if we should use paper trading
@@ -112,12 +111,12 @@ func main() {
 	if dataFeed == "" {
 		dataFeed = "IEX (default)"
 	}
-	log.Printf("Using Alpaca data feed: %s", dataFeed)
+	utils.Info("Using Alpaca data feed: %s", dataFeed)
 
 	// Create market data provider
 	marketProvider, err = market.NewAlpacaProvider(apiKey, apiSecret, usePaperTrading)
 	if err != nil {
-		log.Fatalf("Failed to create market data provider: %v", err)
+		utils.Fatal("Failed to create market data provider: %v", err)
 	}
 
 	// Define tickers to watch
@@ -144,9 +143,9 @@ func main() {
 	go startHTTPServer(httpPort)
 
 	// Keep running until signal received
-	log.Println("Market Data Service running. Press Ctrl+C to exit")
+	utils.Info("Market Data Service running. Press Ctrl+C to exit")
 	<-ctx.Done()
-	log.Println("Shutting down Market Data Service")
+	utils.Info("Shutting down Market Data Service")
 }
 
 // streamMarketData handles both live and daily market data streaming
@@ -163,11 +162,11 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 		}
 	}
 
-	log.Printf("Starting market data stream for %s with interval %v", tickerSymbol, interval)
+	utils.Info("Starting market data stream for %s with interval %v", tickerSymbol, interval)
 
 	// Verify data availability before starting stream
 	if !verifyDataAvailability(ctx, tickerSymbol) {
-		log.Printf("Data not available for %s. Stream will not start until data becomes available.", tickerSymbol)
+		utils.Info("Data not available for %s. Stream will not start until data becomes available.", tickerSymbol)
 	}
 
 	t := time.NewTicker(interval)
@@ -180,7 +179,7 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 	if err == nil {
 		loc = etLoc
 	} else {
-		log.Printf("Warning: Failed to load ET timezone, using UTC instead: %v", err)
+		utils.Warn("Failed to load ET timezone, using UTC instead: %v", err)
 	}
 
 	now := time.Now().In(loc)
@@ -216,17 +215,17 @@ func streamMarketData(ctx context.Context, tickerSymbol string) {
 			if !dataAvailable {
 				dataAvailable = verifyDataAvailability(ctx, tickerSymbol)
 				if !dataAvailable {
-					log.Printf("Still waiting for data availability for %s", tickerSymbol)
+					utils.Info("Still waiting for data availability for %s", tickerSymbol)
 					continue
 				} else {
-					log.Printf("Data now available for %s, starting regular stream", tickerSymbol)
+					utils.Info("Data now available for %s, starting regular stream", tickerSymbol)
 				}
 			}
 
 			// Check if market is open
 			isOpen, err := marketProvider.IsMarketOpen(ctx)
 			if err != nil {
-				log.Printf("Failed to check market status: %v", err)
+				utils.Error("Failed to check market status: %v", err)
 			}
 
 			status.MarketOpen = isOpen
@@ -249,17 +248,17 @@ func verifyDataAvailability(ctx context.Context, tickerSymbol string) bool {
 	// Try to get data
 	data, err := marketProvider.GetMostRecentData(ctx, tickerSymbol)
 	if err != nil {
-		log.Printf("Failed to verify data availability for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to verify data availability for %s: %v", tickerSymbol, err)
 		return false
 	}
 
 	// Check if we got real data or sample data
 	if data.Source == "Sample" {
-		log.Printf("Only sample data available for %s, not starting stream yet", tickerSymbol)
+		utils.Info("Only sample data available for %s, not starting stream yet", tickerSymbol)
 		return false
 	}
 
-	log.Printf("Verified data availability for %s. Source: %s", tickerSymbol, data.Source)
+	utils.Info("Verified data availability for %s. Source: %s", tickerSymbol, data.Source)
 	return true
 }
 
@@ -268,7 +267,7 @@ func publishLiveData(ctx context.Context, tickerSymbol string) {
 	// Fetch latest data from the provider
 	data, err := marketProvider.GetLatestData(ctx, tickerSymbol)
 	if err != nil {
-		log.Printf("Failed to get live data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to get live data for %s: %v", tickerSymbol, err)
 		return
 	}
 
@@ -277,9 +276,9 @@ func publishLiveData(ctx context.Context, tickerSymbol string) {
 
 	// Publish to event stream
 	if err := eventClient.PublishMarketLiveData(ctx, tickerSymbol, data); err != nil {
-		log.Printf("Failed to publish live market data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to publish live market data for %s: %v", tickerSymbol, err)
 	} else {
-		log.Printf("Published live market data for %s: price=$%.2f, volume=%d",
+		utils.Info("Published live market data for %s: price=$%.2f, volume=%d",
 			tickerSymbol, data.Price, data.Volume)
 		status.LastPublished = time.Now()
 		status.StreamStats.LiveEvents++
@@ -291,7 +290,7 @@ func publishMostRecentData(ctx context.Context, tickerSymbol string) {
 	// Fetch recent data from the provider
 	data, err := marketProvider.GetMostRecentData(ctx, tickerSymbol)
 	if err != nil {
-		log.Printf("Failed to get recent data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to get recent data for %s: %v", tickerSymbol, err)
 		return
 	}
 
@@ -300,9 +299,9 @@ func publishMostRecentData(ctx context.Context, tickerSymbol string) {
 
 	// Publish to event stream - we still use the live stream but with a "recent" flag
 	if err := eventClient.PublishMarketLiveData(ctx, tickerSymbol, data); err != nil {
-		log.Printf("Failed to publish recent market data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to publish recent market data for %s: %v", tickerSymbol, err)
 	} else {
-		log.Printf("Published recent market data for %s: price=$%.2f, volume=%d",
+		utils.Info("Published recent market data for %s: price=$%.2f, volume=%d",
 			tickerSymbol, data.Price, data.Volume)
 		status.LastPublished = time.Now()
 	}
@@ -313,7 +312,7 @@ func publishDailyData(ctx context.Context, tickerSymbol string) {
 	// Fetch daily data from the provider
 	data, err := marketProvider.GetDailyData(ctx, tickerSymbol)
 	if err != nil {
-		log.Printf("Failed to get daily data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to get daily data for %s: %v", tickerSymbol, err)
 		return
 	}
 
@@ -322,9 +321,9 @@ func publishDailyData(ctx context.Context, tickerSymbol string) {
 
 	// Publish to daily event stream
 	if err := eventClient.PublishMarketDailyData(ctx, tickerSymbol, data); err != nil {
-		log.Printf("Failed to publish daily market data for %s: %v", tickerSymbol, err)
+		utils.Error("Failed to publish daily market data for %s: %v", tickerSymbol, err)
 	} else {
-		log.Printf("Published daily market data for %s: close=$%.2f, volume=%d",
+		utils.Info("Published daily market data for %s: close=$%.2f, volume=%d",
 			tickerSymbol, data.Close, data.Volume)
 		status.StreamStats.DailyEvents++
 	}
@@ -332,26 +331,31 @@ func publishDailyData(ctx context.Context, tickerSymbol string) {
 
 // subscribeToHistoricalRequests listens for requests to fetch historical data
 func subscribeToHistoricalRequests(ctx context.Context) {
+	utils.Info("Setting up subscription for historical data requests")
+	
 	// Subscribe to historical data requests
 	_, err := eventClient.SubscribeHistoricalRequests(func(ticker, timeframe string, days int, reqData []byte) {
-		log.Printf("Received historical data request: %s, %s, %d days", ticker, timeframe, days)
+		utils.Debug("Received historical data request: %s, %s, %d days", ticker, timeframe, days)
 		status.StreamStats.HistoricalReqs++
 
 		// Parse request data for any additional parameters
 		var request map[string]interface{}
 		if err := json.Unmarshal(reqData, &request); err != nil {
-			log.Printf("Failed to parse request data: %v", err)
+			utils.Warn("Failed to parse request data: %v", err)
 		}
 
 		// Fetch historical data
+		utils.Debug("Fetching historical data from provider for %s", ticker)
 		historicalData, err := marketProvider.GetHistoricalData(ctx, ticker, days, timeframe)
 		if err != nil {
-			log.Printf("Failed to get historical data: %v", err)
+			utils.Error("Failed to get historical data: %v", err)
 			return
 		}
 
 		// Stream is limited so we'll publish in chunks if necessary
 		const chunkSize = 100
+		utils.Debug("Got %d data points for %s, will chunk if needed (chunk size: %d)", 
+			len(historicalData), ticker, chunkSize)
 
 		// If we have a large dataset, publish in chunks
 		if len(historicalData) > chunkSize {
@@ -359,6 +363,8 @@ func subscribeToHistoricalRequests(ctx context.Context) {
 			if len(historicalData)%chunkSize > 0 {
 				chunks++
 			}
+			
+			utils.Debug("Data size exceeds chunk size. Will publish in %d chunks", chunks)
 
 			for i := 0; i < chunks; i++ {
 				start := i * chunkSize
@@ -367,24 +373,30 @@ func subscribeToHistoricalRequests(ctx context.Context) {
 					end = len(historicalData)
 				}
 
+				utils.Debug("Preparing chunk %d/%d for %s with %d data points", 
+					i+1, chunks, ticker, end-start)
+
 				// Prepare chunk data
-				chunkData := map[string]interface{}{
-					"data": historicalData[start:end],
-					"metadata": map[string]interface{}{
-						"ticker":       ticker,
-						"timeframe":    timeframe,
-						"days":         days,
-						"chunk":        i + 1,
-						"total_chunks": chunks,
-						"data_type":    "historical",
-					},
+				metadata := market.ChunkMetadata{
+					Ticker:      ticker,
+					Timeframe:   timeframe,
+					Days:        days,
+					Chunk:       i + 1,
+					TotalChunks: chunks,
+					DataType:    "historical",
+				}
+				
+				chunkData := market.ChunkData{
+					Data:     historicalData[start:end],
+					Metadata: metadata,
 				}
 
 				// Publish chunk
+				utils.Debug("Publishing historical data chunk %d/%d to stream", i+1, chunks)
 				if err := eventClient.PublishHistoricalData(ctx, ticker, timeframe, days, chunkData); err != nil {
-					log.Printf("Failed to publish historical data chunk %d/%d: %v", i+1, chunks, err)
+					utils.Error("Failed to publish historical data chunk %d/%d: %v", i+1, chunks, err)
 				} else {
-					log.Printf("Published historical data chunk %d/%d for %s (%s, %d days)",
+					utils.Info("Published historical data chunk %d/%d for %s (%s, %d days)",
 						i+1, chunks, ticker, timeframe, days)
 				}
 
@@ -392,32 +404,37 @@ func subscribeToHistoricalRequests(ctx context.Context) {
 				time.Sleep(500 * time.Millisecond)
 			}
 		} else {
-			// Prepare data package
-			dataPackage := map[string]interface{}{
-				"data": historicalData,
-				"metadata": map[string]interface{}{
-					"ticker":       ticker,
-					"timeframe":    timeframe,
-					"days":         days,
-					"chunk":        1,
-					"total_chunks": 1,
-					"data_type":    "historical",
-				},
+			utils.Debug("Data fits in a single chunk, publishing directly")
+			
+			// Prepare data package using our centralized model
+			metadata := market.ChunkMetadata{
+				Ticker:      ticker,
+				Timeframe:   timeframe,
+				Days:        days,
+				Chunk:       1,
+				TotalChunks: 1,
+				DataType:    "historical",
+			}
+			
+			chunkData := market.ChunkData{
+				Data:     historicalData,
+				Metadata: metadata,
 			}
 
 			// Publish all data at once for smaller datasets
-			if err := eventClient.PublishHistoricalData(ctx, ticker, timeframe, days, dataPackage); err != nil {
-				log.Printf("Failed to publish historical data: %v", err)
+			utils.Debug("Publishing historical data to stream")
+			if err := eventClient.PublishHistoricalData(ctx, ticker, timeframe, days, chunkData); err != nil {
+				utils.Error("Failed to publish historical data: %v", err)
 			} else {
-				log.Printf("Published historical data for %s (%s, %d days)", ticker, timeframe, days)
+				utils.Info("Published historical data for %s (%s, %d days)", ticker, timeframe, days)
 			}
 		}
 	})
 
 	if err != nil {
-		log.Printf("Failed to subscribe to historical requests: %v", err)
+		utils.Error("Failed to subscribe to historical requests: %v", err)
 	} else {
-		log.Printf("Subscribed to historical data requests")
+		utils.Info("Successfully subscribed to historical data requests")
 	}
 }
 
@@ -489,8 +506,8 @@ func startHTTPServer(port string) {
 
 	// Start HTTP server
 	serverAddr := ":" + port
-	log.Printf("Starting HTTP server on %s", serverAddr)
+	utils.Info("Starting HTTP server on %s", serverAddr)
 	if err := http.ListenAndServe(serverAddr, nil); err != nil {
-		log.Fatalf("HTTP server failed: %v", err)
+		utils.Fatal("HTTP server failed: %v", err)
 	}
 }

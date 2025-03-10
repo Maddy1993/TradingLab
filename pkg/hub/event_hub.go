@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -94,28 +93,28 @@ func (h *EventHub) Start(ctx context.Context) error {
 
 	// Subscribe to market live data
 	if err := h.subscribeToMarketLiveData(ctx); err != nil {
-		log.Printf("Warning: failed to subscribe to market live data: %v", err)
+		utils.Warn("Warning: failed to subscribe to market live data: %v", err)
 		startupErrors = append(startupErrors, fmt.Sprintf("live data: %v", err))
 		h.registerFailedStream("live", events.SubjectMarketLiveAll)
 	}
 
 	// Subscribe to market daily data
 	if err := h.subscribeToMarketDailyData(ctx); err != nil {
-		log.Printf("Warning: failed to subscribe to market daily data: %v", err)
+		utils.Warn("Warning: failed to subscribe to market daily data: %v", err)
 		startupErrors = append(startupErrors, fmt.Sprintf("daily data: %v", err))
 		h.registerFailedStream("daily", events.SubjectMarketDailyAll)
 	}
 
 	// Subscribe to historical data
 	if err := h.subscribeToHistoricalData(ctx); err != nil {
-		log.Printf("Warning: failed to subscribe to historical data: %v", err)
+		utils.Warn("Warning: failed to subscribe to historical data: %v", err)
 		startupErrors = append(startupErrors, fmt.Sprintf("historical data: %v", err))
 		h.registerFailedStream("historical", events.SubjectMarketHistoricalAll)
 	}
 
 	// Subscribe to signals
 	if err := h.subscribeToSignals(ctx); err != nil {
-		log.Printf("Warning: failed to subscribe to signals: %v", err)
+		utils.Warn("Warning: failed to subscribe to signals: %v", err)
 		startupErrors = append(startupErrors, fmt.Sprintf("signals: %v", err))
 		h.registerFailedStream("signals", events.SubjectSignalsAll)
 	}
@@ -125,7 +124,7 @@ func (h *EventHub) Start(ctx context.Context) error {
 
 	// Subscribe to requests - this is critical for functionality
 	if err := h.subscribeToRequests(ctx); err != nil {
-		log.Printf("Error: failed to subscribe to requests: %v", err)
+		utils.Error("Error: failed to subscribe to requests: %v", err)
 		startupErrors = append(startupErrors, fmt.Sprintf("requests: %v", err))
 		h.registerFailedStream("requests", "requests.historical.*.*.*")
 		criticalError = true
@@ -140,12 +139,12 @@ func (h *EventHub) Start(ctx context.Context) error {
 	// Log startup status
 	if len(startupErrors) > 0 {
 		if criticalError {
-			log.Printf("Event Hub started with critical errors: %v", startupErrors)
+			utils.Error("Event Hub started with critical errors: %v", startupErrors)
 			return fmt.Errorf("failed to start critical components: %v", strings.Join(startupErrors, ", "))
 		}
-		log.Printf("Event Hub started with some streams unavailable: %v", startupErrors)
+		utils.Warn("Event Hub started with some streams unavailable: %v", startupErrors)
 	} else {
-		log.Printf("Event Hub started successfully with all streams")
+		utils.Info("Event Hub started successfully with all streams")
 	}
 
 	return nil
@@ -187,7 +186,7 @@ func (h *EventHub) subscribeToMarketLiveData(ctx context.Context) error {
 		// Process and route live market data
 		var marketData map[string]interface{}
 		if err := json.Unmarshal(data, &marketData); err != nil {
-			log.Printf("Error unmarshaling live market data: %v", err)
+			utils.Error("Error unmarshaling live market data: %v", err)
 			return
 		}
 
@@ -203,7 +202,7 @@ func (h *EventHub) subscribeToMarketLiveData(ctx context.Context) error {
 			h.stats.TickerStats[ticker] = stats
 			h.mu.Unlock()
 
-			log.Printf("Processed live market data for %s", ticker)
+			utils.Debug("Processed live market data for %s", ticker)
 		}
 	})
 
@@ -219,7 +218,7 @@ func (h *EventHub) subscribeToMarketLiveData(ctx context.Context) error {
 	})
 	h.mu.Unlock()
 
-	log.Printf("Subscribed to live market data")
+	utils.Info("Subscribed to live market data")
 	return nil
 }
 
@@ -236,7 +235,7 @@ func (h *EventHub) subscribeToMarketDailyData(ctx context.Context) error {
 		// Process and route daily market data
 		var marketData map[string]interface{}
 		if err := json.Unmarshal(data, &marketData); err != nil {
-			log.Printf("Error unmarshaling daily market data: %v", err)
+			utils.Error("Error unmarshaling daily market data: %v", err)
 			return
 		}
 
@@ -252,7 +251,7 @@ func (h *EventHub) subscribeToMarketDailyData(ctx context.Context) error {
 			h.stats.TickerStats[ticker] = stats
 			h.mu.Unlock()
 
-			log.Printf("Processed daily market data for %s", ticker)
+			utils.Debug("Processed daily market data for %s", ticker)
 		}
 	})
 
@@ -268,7 +267,7 @@ func (h *EventHub) subscribeToMarketDailyData(ctx context.Context) error {
 	})
 	h.mu.Unlock()
 
-	log.Printf("Subscribed to daily market data")
+	utils.Info("Subscribed to daily market data")
 	return nil
 }
 
@@ -285,14 +284,14 @@ func (h *EventHub) subscribeToHistoricalData(ctx context.Context) error {
 		// Process historical data
 		var histData map[string]interface{}
 		if err := json.Unmarshal(data, &histData); err != nil {
-			log.Printf("Error unmarshaling historical data: %v", err)
+			utils.Error("Error unmarshaling historical data: %v", err)
 			return
 		}
 
 		// Extract metadata
 		metadata, ok := histData["metadata"].(map[string]interface{})
 		if !ok {
-			log.Printf("Historical data missing metadata")
+			utils.Warn("Historical data missing metadata")
 			return
 		}
 
@@ -314,7 +313,7 @@ func (h *EventHub) subscribeToHistoricalData(ctx context.Context) error {
 				chunkInfo = fmt.Sprintf(" (chunk %d/%d)", int(chunk), int(totalChunks))
 			}
 
-			log.Printf("Processed historical data for %s%s", ticker, chunkInfo)
+			utils.Debug("Processed historical data for %s%s", ticker, chunkInfo)
 		}
 	})
 
@@ -330,7 +329,7 @@ func (h *EventHub) subscribeToHistoricalData(ctx context.Context) error {
 	})
 	h.mu.Unlock()
 
-	log.Printf("Subscribed to historical market data")
+	utils.Info("Subscribed to historical market data")
 	return nil
 }
 
@@ -347,7 +346,7 @@ func (h *EventHub) subscribeToSignals(ctx context.Context) error {
 		// Process signal data
 		var signalData map[string]interface{}
 		if err := json.Unmarshal(data, &signalData); err != nil {
-			log.Printf("Error unmarshaling signal data: %v", err)
+			utils.Error("Error unmarshaling signal data: %v", err)
 			return
 		}
 
@@ -364,7 +363,7 @@ func (h *EventHub) subscribeToSignals(ctx context.Context) error {
 			h.mu.Unlock()
 
 			signalType, _ := signalData["signal_type"].(string)
-			log.Printf("Processed %s signal for %s", signalType, ticker)
+			utils.Debug("Processed %s signal for %s", signalType, ticker)
 		}
 	})
 
@@ -380,7 +379,7 @@ func (h *EventHub) subscribeToSignals(ctx context.Context) error {
 	})
 	h.mu.Unlock()
 
-	log.Printf("Subscribed to trading signals")
+	utils.Info("Subscribed to trading signals")
 	return nil
 }
 
@@ -395,7 +394,7 @@ func (h *EventHub) subscribeToRequests(ctx context.Context) error {
 		h.stats.LastUpdated = time.Now()
 		h.mu.Unlock()
 
-		log.Printf("Received request: historical data for %s (%s, %d days)", ticker, timeframe, days)
+		utils.Info("Received request: historical data for %s (%s, %d days)", ticker, timeframe, days)
 
 		// Find handler for the request type
 		h.mu.Lock()
@@ -403,13 +402,13 @@ func (h *EventHub) subscribeToRequests(ctx context.Context) error {
 		h.mu.Unlock()
 
 		if !ok {
-			log.Printf("No handler registered for historical data requests")
+			utils.Warn("No handler registered for historical data requests")
 			return
 		}
 
 		// Process request
 		if err := handler(ctx, ticker, timeframe, days, reqData); err != nil {
-			log.Printf("Error handling historical data request: %v", err)
+			utils.Error("Error handling historical data request: %v", err)
 			h.mu.Lock()
 			h.stats.ErrorCount++
 			h.mu.Unlock()
@@ -428,13 +427,13 @@ func (h *EventHub) subscribeToRequests(ctx context.Context) error {
 	})
 	h.mu.Unlock()
 
-	log.Printf("Subscribed to data requests")
+	utils.Info("Subscribed to data requests")
 	return nil
 }
 
 // handleHistoricalDataRequest processes a request for historical data
 func (h *EventHub) handleHistoricalDataRequest(ctx context.Context, ticker, timeframe string, days int, reqData []byte) error {
-	log.Printf("Processing historical data request for %s (%s, %d days)", ticker, timeframe, days)
+	utils.Info("Processing historical data request for %s (%s, %d days)", ticker, timeframe, days)
 
 	// Parse request details
 	var request map[string]interface{}
@@ -483,7 +482,7 @@ func (h *EventHub) reportStats(ctx context.Context) {
 			errCount := h.stats.ErrorCount
 			h.mu.Unlock()
 
-			log.Printf("Event Hub Stats - Total: %d (Live: %d, Daily: %d, Historical: %d, Signals: %d, Requests: %d, Errors: %d)",
+			utils.Info("Event Hub Stats - Total: %d (Live: %d, Daily: %d, Historical: %d, Signals: %d, Requests: %d, Errors: %d)",
 				totalEvents, liveEvents, dailyEvents, histEvents, signalEvents, reqEvents, errCount)
 
 			// Log per-ticker stats for active tickers (with recent events)
@@ -493,7 +492,7 @@ func (h *EventHub) reportStats(ctx context.Context) {
 				// Only log stats for tickers with activity in the last 10 minutes
 				if time.Since(stats.LastEventTime) < 10*time.Minute {
 					activeTickerCount++
-					log.Printf("  %s: Live: %d, Daily: %d, Historical: %d, Signals: %d, Last: %s",
+					utils.Debug("  %s: Live: %d, Daily: %d, Historical: %d, Signals: %d, Last: %s",
 						ticker, stats.LiveEvents, stats.DailyEvents, stats.HistoricalEvents,
 						stats.SignalEvents, utils.FormatTime(stats.LastEventTime, "15:04:05"))
 				}
@@ -501,7 +500,7 @@ func (h *EventHub) reportStats(ctx context.Context) {
 			h.mu.Unlock()
 
 			if activeTickerCount == 0 {
-				log.Printf("  No active tickers in the last 10 minutes")
+				utils.Debug("  No active tickers in the last 10 minutes")
 			}
 		}
 	}
@@ -565,7 +564,7 @@ func (h *EventHub) retryStreams() {
 		return
 	}
 
-	log.Printf("Attempting to reconnect to %d failed streams", len(failedStreams))
+	utils.Info("Attempting to reconnect to %d failed streams", len(failedStreams))
 
 	for streamType := range failedStreams {
 		var err error
@@ -588,9 +587,9 @@ func (h *EventHub) retryStreams() {
 			h.mu.Lock()
 			delete(h.failedStreams, streamType)
 			h.mu.Unlock()
-			log.Printf("Successfully reconnected to %s stream", streamType)
+			utils.Info("Successfully reconnected to %s stream", streamType)
 		} else {
-			log.Printf("Failed to reconnect to %s stream: %v", streamType, err)
+			utils.Error("Failed to reconnect to %s stream: %v", streamType, err)
 			// Update last retry time
 			h.mu.Lock()
 			if config, exists := h.failedStreams[streamType]; exists {
@@ -628,7 +627,7 @@ func (h *EventHub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	log.Printf("Shutting down Event Hub with %d active subscriptions", len(h.subscriptions))
+	utils.Info("Shutting down Event Hub with %d active subscriptions", len(h.subscriptions))
 
 	// Cancel context to stop background goroutines
 	if h.cancel != nil {

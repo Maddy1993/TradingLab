@@ -3,24 +3,23 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/myapp/tradinglab/pkg/events"
+	"github.com/myapp/tradinglab/pkg/utils"
 )
 
 func init() {
 	// Set timezone to PST
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
-		log.Printf("Failed to load PST timezone: %v", err)
+		utils.Error("Failed to load PST timezone: %v", err)
 		return
 	}
 	time.Local = loc
-	log.SetFlags(log.LstdFlags | log.LUTC)
 }
 
 func main() {
@@ -30,12 +29,12 @@ func main() {
 		natsURL = "nats://localhost:4222"
 	}
 
-	log.Printf("Connecting to NATS server at %s", natsURL)
+	utils.Info("Connecting to NATS server at %s", natsURL)
 
 	// Create event client
 	client, err := events.NewEventClient(natsURL)
 	if err != nil {
-		log.Fatalf("Failed to create event client: %v", err)
+		utils.Fatal("Failed to create event client: %v", err)
 	}
 	defer client.Close()
 
@@ -49,26 +48,26 @@ func main() {
 
 	go func() {
 		sig := <-signals
-		log.Printf("Received signal: %v", sig)
+		utils.Info("Received signal: %v", sig)
 		cancel()
 	}()
 
 	// Subscribe to market data for example ticker
 	ticker := "SPY"
 	sub, err := client.SubscribeMarketLiveData(ticker, func(data []byte) {
-		log.Printf("Received live data for %s: %s", ticker, string(data))
+		utils.Info("Received live data for %s: %s", ticker, string(data))
 	})
 	if err != nil {
-		log.Fatalf("Failed to subscribe to market live data: %v", err)
+		utils.Fatal("Failed to subscribe to market live data: %v", err)
 	}
 	defer sub.Unsubscribe()
 
 	// Also subscribe to daily data
 	dailySub, err := client.SubscribeMarketDailyData(ticker, func(data []byte) {
-		log.Printf("Received daily data for %s: %s", ticker, string(data))
+		utils.Info("Received daily data for %s: %s", ticker, string(data))
 	})
 	if err != nil {
-		log.Fatalf("Failed to subscribe to market daily data: %v", err)
+		utils.Fatal("Failed to subscribe to market daily data: %v", err)
 	}
 	defer dailySub.Unsubscribe()
 
@@ -96,9 +95,9 @@ func main() {
 				}
 
 				if err := client.PublishMarketLiveData(ctx, "SPY", liveData); err != nil {
-					log.Printf("Failed to publish market live data: %v", err)
+					utils.Error("Failed to publish market live data: %v", err)
 				} else {
-					log.Printf("Published market live data for SPY")
+					utils.Info("Published market live data for SPY")
 				}
 
 				// Every 30 seconds, publish daily data as well
@@ -116,9 +115,9 @@ func main() {
 					}
 
 					if err := client.PublishMarketDailyData(ctx, "SPY", dailyData); err != nil {
-						log.Printf("Failed to publish market daily data: %v", err)
+						utils.Error("Failed to publish market daily data: %v", err)
 					} else {
-						log.Printf("Published market daily data for SPY")
+						utils.Info("Published market daily data for SPY")
 					}
 				}
 			}
@@ -126,7 +125,7 @@ func main() {
 	}()
 
 	// Keep running until signal received
-	log.Println("Event client running. Press Ctrl+C to exit")
+	utils.Info("Event client running. Press Ctrl+C to exit")
 	<-ctx.Done()
-	log.Println("Shutting down event client")
+	utils.Info("Shutting down event client")
 }
